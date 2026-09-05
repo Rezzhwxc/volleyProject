@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { insertStatsIgnoreBatch, type StatInsertRow } from "@db/insert";
+import { insertStatsIgnoreBatch, chunkIds, type StatInsertRow } from "@db/insert";
 
 const sampleRow: StatInsertRow = {
   playerId: 1,
@@ -18,6 +18,16 @@ const sampleRow: StatInsertRow = {
   servingErrors: 0,
   miscErrors: 0,
 };
+
+describe("chunkIds", () => {
+  it("splits long id lists under the D1 bind limit", () => {
+    const ids = Array.from({ length: 311 }, (_, index) => index + 1);
+    const chunks = chunkIds(ids);
+    expect(chunks).toHaveLength(4);
+    expect(chunks.every((chunk) => chunk.length <= 80)).toBe(true);
+    expect(chunks.flat()).toEqual(ids);
+  });
+});
 
 describe("insertStatsIgnoreBatch", () => {
   it("binds created_at and updated_at for D1 batch inserts", async () => {

@@ -1,6 +1,6 @@
 import { and, asc, desc, eq, inArray, isNotNull, or, sql } from "drizzle-orm";
 import type { Db } from "@db";
-import { insertMany } from "@db/insert";
+import { insertMany, chunkIds } from "@db/insert";
 import {
   gameStaff,
   games,
@@ -225,23 +225,23 @@ async function attachTeams<T extends { id: number }>(db: Db, rows: T[]) {
     );
   }
 
-  const links = await db
-    .select({
-      gameId: teamsGames.gameId,
-      slot: teamsGames.slot,
-      id: teams.id,
-      name: teams.name,
-      logoUrl: teams.logoUrl,
-    })
-    .from(teamsGames)
-    .innerJoin(teams, eq(teamsGames.teamId, teams.id))
-    .where(
-      inArray(
-        teamsGames.gameId,
-        rows.map((row) => row.id),
-      ),
-    )
-    .orderBy(asc(teamsGames.slot));
+  const gameIds = rows.map((row) => row.id);
+  const links = [];
+  for (const chunk of chunkIds(gameIds)) {
+    const part = await db
+      .select({
+        gameId: teamsGames.gameId,
+        slot: teamsGames.slot,
+        id: teams.id,
+        name: teams.name,
+        logoUrl: teams.logoUrl,
+      })
+      .from(teamsGames)
+      .innerJoin(teams, eq(teamsGames.teamId, teams.id))
+      .where(inArray(teamsGames.gameId, chunk))
+      .orderBy(asc(teamsGames.slot));
+    links.push(...part);
+  }
 
   const byGame = new Map<number, TeamRef[]>();
   for (const link of links) {
@@ -261,22 +261,22 @@ function emptyStaff(): GameStaffSlots {
 async function attachStaff<T extends { id: number }>(db: Db, rows: T[]) {
   if (rows.length === 0) return rows.map((row) => ({ ...row, staff: emptyStaff() }));
 
-  const links = await db
-    .select({
-      gameId: gameStaff.gameId,
-      role: gameStaff.role,
-      id: user.id,
-      name: user.name,
-      email: user.email,
-    })
-    .from(gameStaff)
-    .innerJoin(user, eq(gameStaff.userId, user.id))
-    .where(
-      inArray(
-        gameStaff.gameId,
-        rows.map((row) => row.id),
-      ),
-    );
+  const gameIds = rows.map((row) => row.id);
+  const links = [];
+  for (const chunk of chunkIds(gameIds)) {
+    const part = await db
+      .select({
+        gameId: gameStaff.gameId,
+        role: gameStaff.role,
+        id: user.id,
+        name: user.name,
+        email: user.email,
+      })
+      .from(gameStaff)
+      .innerJoin(user, eq(gameStaff.userId, user.id))
+      .where(inArray(gameStaff.gameId, chunk));
+    links.push(...part);
+  }
 
   const byGame = new Map<number, GameStaffSlots>();
   for (const link of links) {

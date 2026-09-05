@@ -18,6 +18,15 @@ export function chunkRows<T>(rows: T[], columnCount: number): T[][] {
   return chunks;
 }
 
+/** Chunk scalar bind values for D1 `IN (...)` clauses (100-param limit). */
+export function chunkIds(ids: number[], max = 80): number[][] {
+  const chunks: number[][] = [];
+  for (let index = 0; index < ids.length; index += max) {
+    chunks.push(ids.slice(index, index + max));
+  }
+  return chunks;
+}
+
 function boundColumnCount<TTable extends SQLiteTable>(
   table: TTable,
   rows: InferInsertModel<TTable>[],
