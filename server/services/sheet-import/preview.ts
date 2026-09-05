@@ -1,9 +1,10 @@
 import { eq, inArray } from "drizzle-orm";
 import type { Db } from "@db";
+import { chunkValues } from "@db/insert";
 import { players, seasons } from "@db/schema";
 import { BadRequestError } from "../errors";
 import { matchStatsToGames, mergeTeamRosters, rosterSizeWarnings } from "./match";
-import { normalizeName } from "./names";
+import { isPlaceholderTeamName, normalizeName } from "./names";
 import { loadMasterSource, loadRegionalSource } from "./sources";
 import type { FetchImpl } from "./fetch";
 import type {
@@ -30,13 +31,18 @@ function yearFromDate(iso?: string): number {
   return new Date().getUTCFullYear();
 }
 
+function formatNameSample(names: string[], max = 5): string {
+  const unique = [...new Set(names)];
+  const head = unique.slice(0, max).map((name) => `"${name}"`).join(", ");
+  const rest = unique.length > max ? `, +${unique.length - max} more` : "";
+  return head + rest;
+}
+
 async function existingPlayerNames(db: Db, names: string[]): Promise<Set<string>> {
   if (names.length === 0) return new Set();
   const lowered = [...new Set(names.map((name) => name.toLowerCase()))];
   const found = new Set<string>();
-  const chunkSize = 80;
-  for (let index = 0; index < lowered.length; index += chunkSize) {
-    const chunk = lowered.slice(index, index + chunkSize);
+  for (const chunk of chunkValues(lowered)) {
     const rows = await db
       .select({ name: players.name })
       .from(players)
@@ -236,10 +242,12 @@ export async function assembleSheetImportPreview(
 
   if (includeTeams && includeGames) {
     const known = new Set(teams.map((team) => normalizeName(team.name)));
+    const stubTeamsFromGames: string[] = [];
     for (const game of games) {
       for (const name of [game.team1Name, game.team2Name]) {
+        if (isPlaceholderTeamName(name)) continue;
         if (!known.has(normalizeName(name))) {
-          warnings.push(`Game references team "${name}" which was not found on TEAMS tabs`);
+          stubTeamsFromGames.push(name);
           const key = teamKey(name, game.region);
           teams.push({
             key,
@@ -252,6 +260,11 @@ export async function assembleSheetImportPreview(
         }
       }
     }
+    if (stubTeamsFromGames.length > 0) {
+      warnings.push(
+        `${stubTeamsFromGames.length} schedule-only team(s) will be created from game references (${formatNameSample(stubTeamsFromGames)})`,
+      );
+    }
   }
 
   const newNames = new Set(playerRows.filter((row) => !row.exists).map((row) => row.name));
@@ -262,6 +275,7 @@ export async function assembleSheetImportPreview(
   if (includePlayers) {
     const teamsByPlayer = new Map<string, { label: string; teams: string[] }>();
     for (const team of activeTeams) {
+      if (isPlaceholderTeamName(team.name)) continue;
       for (const playerName of team.playerNames) {
         const key = normalizeName(playerName);
         const entry = teamsByPlayer.get(key) ?? { label: playerName, teams: [] };

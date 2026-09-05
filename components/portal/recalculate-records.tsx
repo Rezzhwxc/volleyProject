@@ -17,7 +17,7 @@ const ALL_SEASONS = "__all";
 
 export function RecalculateRecords({ seasons }: { seasons: { id: number; label: string }[] }) {
   const router = useRouter();
-  const showErrorToast = usePortalErrorToast();
+  const { showErrorToast } = usePortalErrorToast();
   const [seasonId, setSeasonId] = useState(ALL_SEASONS);
   const recalculate = trpc.records.recalculate.useMutation();
 

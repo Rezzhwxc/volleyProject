@@ -6,7 +6,7 @@ function requestFor(key: string) {
 
 function cacheStore(): Cache | null {
   try {
-    return typeof caches === "undefined" ? null : caches.default;
+    return typeof caches === "undefined" ? null : (caches.default ?? null);
   } catch {
     return null;
   }

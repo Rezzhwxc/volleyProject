@@ -18,13 +18,18 @@ export function chunkRows<T>(rows: T[], columnCount: number): T[][] {
   return chunks;
 }
 
-/** Chunk scalar bind values for D1 `IN (...)` clauses (100-param limit). */
-export function chunkIds(ids: number[], max = 80): number[][] {
-  const chunks: number[][] = [];
-  for (let index = 0; index < ids.length; index += max) {
-    chunks.push(ids.slice(index, index + max));
+/** Chunk bind values for D1 `IN (...)` clauses (100-param limit). */
+export function chunkValues<T>(values: T[], max = 80): T[][] {
+  const chunks: T[][] = [];
+  for (let index = 0; index < values.length; index += max) {
+    chunks.push(values.slice(index, index + max));
   }
   return chunks;
+}
+
+/** @deprecated Prefer chunkValues — kept for call sites keyed on numeric ids. */
+export function chunkIds(ids: number[], max = 80): number[][] {
+  return chunkValues(ids, max);
 }
 
 function boundColumnCount<TTable extends SQLiteTable>(

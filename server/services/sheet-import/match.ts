@@ -1,4 +1,4 @@
-import { namesEqual, normalizeName } from "./names";
+import { namesEqual, isPlaceholderTeamName, normalizeName } from "./names";
 import { syntheticGameKey } from "./keys";
 import type { ParsedGame, ParsedScoreBlock, PreviewStat, SheetStatCounts } from "./types";
 
@@ -175,6 +175,7 @@ export function matchStatsToGames(
 
     const opponent = opponentFromBlock(block);
     if (!opponent) continue;
+    if (isPlaceholderTeamName(block.teamName) || isPlaceholderTeamName(opponent)) continue;
 
     const pairKey = gamePairKey(block.region, block.teamName, opponent);
     const candidates = games.filter(
@@ -196,6 +197,7 @@ export function matchStatsToGames(
 
     const opponent = opponentFromBlock(block);
     if (!opponent) continue;
+    if (isPlaceholderTeamName(block.teamName) || isPlaceholderTeamName(opponent)) continue;
 
     const pairKey = gamePairKey(block.region, block.teamName, opponent);
     const alreadyScheduled = games.some(
@@ -213,6 +215,7 @@ export function matchStatsToGames(
     if (usedBlocks.has(index)) continue;
     const block = blocks[index];
     if (!block) continue;
+    if (isPlaceholderTeamName(block.teamName)) continue;
     warnings.push(
       `Unmatched score block: ${block.teamName} ${block.teamScore}-${block.opponentScore} (winner ${block.winnerName}, ${block.region})`,
     );

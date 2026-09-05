@@ -1,6 +1,6 @@
 import { parseCsv, cell } from "./csv";
 import { masterGameKey } from "./keys";
-import { displayName, normalizeName, parseTeamHeader } from "./names";
+import { displayName, isPlaceholderTeamName, normalizeName, parseTeamHeader } from "./names";
 import type { ParsedGame, ParsedTeam, SheetRegion, TeamLeadershipRole } from "./types";
 
 const REGION_TAB = /^(NA|EU|AS)\s+(TEAMS|QUALIFIERS|PLAYOFFS)$/i;
@@ -226,6 +226,7 @@ function isVolleyballSetScore(value: string): boolean {
 function looksLikeTeam(value: string): boolean {
   const name = displayName(value);
   if (!name || name.length < 2) return false;
+  if (isPlaceholderTeamName(name)) return false;
   if (/^date:/i.test(name)) return false;
   if (/^referee/i.test(name)) return false;
   if (/^media/i.test(name)) return false;

@@ -1,6 +1,6 @@
 import { asc, eq, inArray } from "drizzle-orm";
 import type { Db } from "@db";
-import { insertMany } from "@db/insert";
+import { insertMany, chunkIds, chunkValues } from "@db/insert";
 import { AWARD_TYPES, awards, awardsPlayers, players, seasons } from "@db/schema";
 import { found, inserted, NotFoundError } from "./errors";
 import type { PartialInput } from "./input";
@@ -33,21 +33,21 @@ interface PlayerRef {
 async function attachPlayers<T extends { id: number }>(db: Db, rows: T[]) {
   if (rows.length === 0) return rows.map((row) => ({ ...row, players: [] as PlayerRef[] }));
 
-  const links = await db
-    .select({
-      awardId: awardsPlayers.awardId,
-      id: players.id,
-      name: players.name,
-      position: players.position,
-    })
-    .from(awardsPlayers)
-    .innerJoin(players, eq(awardsPlayers.playerId, players.id))
-    .where(
-      inArray(
-        awardsPlayers.awardId,
-        rows.map((row) => row.id),
-      ),
-    );
+  const awardIds = rows.map((row) => row.id);
+  const links = [];
+  for (const chunk of chunkIds(awardIds)) {
+    const part = await db
+      .select({
+        awardId: awardsPlayers.awardId,
+        id: players.id,
+        name: players.name,
+        position: players.position,
+      })
+      .from(awardsPlayers)
+      .innerJoin(players, eq(awardsPlayers.playerId, players.id))
+      .where(inArray(awardsPlayers.awardId, chunk));
+    links.push(...part);
+  }
 
   const byAward = new Map<number, PlayerRef[]>();
   for (const link of links) {
@@ -145,7 +145,11 @@ export async function createWithPlayerNames(
   input: Omit<AwardInput, "playerIds"> & { playerNames: string[] },
 ) {
   const names = input.playerNames.map((name) => name.toLowerCase());
-  const matched = await db.select().from(players).where(inArray(players.name, names));
+  const matched = [];
+  for (const chunk of chunkValues(names)) {
+    const part = await db.select().from(players).where(inArray(players.name, chunk));
+    matched.push(...part);
+  }
   if (matched.length !== names.length) {
     const missing = names.filter((name) => !matched.some((player) => player.name === name));
     throw new NotFoundError(`Players ${missing.join(", ")}`);

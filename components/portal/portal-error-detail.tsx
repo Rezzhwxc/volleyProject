@@ -6,6 +6,7 @@ import {
   useCallback,
   useContext,
   useState,
+  type MouseEvent,
   type ReactNode,
 } from "react";
 import { toast } from "sonner";
@@ -21,9 +22,14 @@ import {
 
 type ErrorDetail = { title: string; message: string };
 
-const PortalErrorToastContext = createContext<((title: string, error: unknown) => void) | null>(
-  null,
-);
+type PortalErrorApi = {
+  /** Short toast; click opens the detail modal. */
+  showErrorToast: (title: string, error: unknown) => void;
+  /** Open the detail modal only — no toast (use inside dialogs / during import progress). */
+  showErrorDetail: (title: string, error: unknown) => void;
+};
+
+const PortalErrorToastContext = createContext<PortalErrorApi | null>(null);
 
 function formatError(error: unknown): string {
   if (error instanceof Error) return error.message;
@@ -50,6 +56,13 @@ export function PortalErrorDetailProvider({ children }: { children: ReactNode })
     setDetail({ title, message });
   }, []);
 
+  const showErrorDetail = useCallback(
+    (title: string, error: unknown) => {
+      openDetail(title, formatError(error));
+    },
+    [openDetail],
+  );
+
   const showErrorToast = useCallback(
     (title: string, error: unknown) => {
       const message = formatError(error);
@@ -58,6 +71,10 @@ export function PortalErrorDetailProvider({ children }: { children: ReactNode })
           const open = () => {
             toast.dismiss(id);
             openDetail(title, message);
+          };
+          const dismiss = (event: MouseEvent) => {
+            event.stopPropagation();
+            toast.dismiss(id);
           };
           return (
             <div className="cn-toast group toast relative flex w-[min(92vw,28rem)] items-start gap-3 rounded-lg border border-rvl-line bg-rvl-ground p-4 pr-10 text-left text-rvl-ink shadow-lg">
@@ -78,7 +95,7 @@ export function PortalErrorDetailProvider({ children }: { children: ReactNode })
               <button
                 type="button"
                 aria-label="Dismiss"
-                onClick={() => toast.dismiss(id)}
+                onClick={dismiss}
                 className="absolute top-2 right-2 rounded-xs p-1 text-rvl-ink-2 transition-colors hover:bg-rvl-panel hover:text-rvl-ink"
               >
                 <XIcon className="size-4" />
@@ -86,7 +103,7 @@ export function PortalErrorDetailProvider({ children }: { children: ReactNode })
             </div>
           );
         },
-        { duration: 60_000 },
+        { duration: 60_000, id: `portal-error-${Date.now()}` },
       );
     },
     [openDetail],
@@ -99,7 +116,7 @@ export function PortalErrorDetailProvider({ children }: { children: ReactNode })
   }
 
   return (
-    <PortalErrorToastContext.Provider value={showErrorToast}>
+    <PortalErrorToastContext.Provider value={{ showErrorToast, showErrorDetail }}>
       {children}
       <Dialog open={detail != null} onOpenChange={(open) => !open && setDetail(null)}>
         <DialogContent className="flex max-h-[92vh] w-[min(96vw,56rem)] flex-col gap-4 sm:max-w-[min(96vw,56rem)]">
@@ -125,10 +142,10 @@ export function PortalErrorDetailProvider({ children }: { children: ReactNode })
   );
 }
 
-export function usePortalErrorToast() {
-  const showErrorToast = useContext(PortalErrorToastContext);
-  if (!showErrorToast) {
+export function usePortalErrorToast(): PortalErrorApi {
+  const api = useContext(PortalErrorToastContext);
+  if (!api) {
     throw new Error("usePortalErrorToast requires PortalErrorDetailProvider");
   }
-  return showErrorToast;
+  return api;
 }

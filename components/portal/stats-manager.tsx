@@ -81,7 +81,7 @@ function counterValues(values: Record<string, string>) {
 
 function CsvUpload({ games }: { games: { id: number; label: string }[] }) {
   const router = useRouter();
-  const showErrorToast = usePortalErrorToast();
+  const { showErrorToast } = usePortalErrorToast();
   const [open, setOpen] = useState(false);
   const [gameId, setGameId] = useState("");
   const [csv, setCsv] = useState("");

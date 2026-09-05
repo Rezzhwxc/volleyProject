@@ -71,6 +71,7 @@ type StagedSources = {
 
 type ProgressState = {
   active: boolean;
+  failed?: boolean;
   index: number;
   total: number;
   label: string;
@@ -84,21 +85,33 @@ const buttonClass =
 const primaryClass =
   "cursor-pointer border-none bg-rvl-accent-bg px-5 py-2.5 font-mono text-[0.68rem] font-bold uppercase tracking-[0.14em] text-rvl-on-accent transition-opacity hover:enabled:opacity-85 disabled:cursor-not-allowed disabled:opacity-50";
 
-function ImportProgress({ progress }: { progress: ProgressState }) {
+function ImportProgress({
+  progress,
+  onViewError,
+}: {
+  progress: ProgressState;
+  onViewError?: (() => void) | undefined;
+}) {
   if (!progress.active) return null;
   const pct = progress.total > 0 ? Math.min(100, Math.round((progress.index / progress.total) * 100)) : 0;
 
   return (
-    <div className="space-y-3 border border-rvl-line bg-rvl-panel/40 p-4">
+    <div
+      className={`space-y-3 border p-4 ${progress.failed ? "border-destructive/40 bg-destructive/5" : "border-rvl-line bg-rvl-panel/40"}`}
+    >
       <div className="flex items-baseline justify-between gap-3">
-        <p className="font-mono text-[0.72rem] uppercase tracking-[0.14em] text-rvl-accent">
-          Step {Math.min(progress.index + 1, progress.total)} of {progress.total}
+        <p
+          className={`font-mono text-[0.72rem] uppercase tracking-[0.14em] ${progress.failed ? "text-destructive" : "text-rvl-accent"}`}
+        >
+          {progress.failed
+            ? "Failed"
+            : `Step ${Math.min(progress.index + 1, progress.total)} of ${progress.total}`}
         </p>
         <p className="font-mono text-[0.62rem] text-rvl-ink-2">{pct}%</p>
       </div>
       <div className="h-1.5 overflow-hidden bg-rvl-line">
         <div
-          className="h-full bg-rvl-accent transition-[width] duration-300"
+          className={`h-full transition-[width] duration-300 ${progress.failed ? "bg-destructive" : "bg-rvl-accent"}`}
           style={{ width: `${pct}%` }}
         />
       </div>
@@ -106,6 +119,11 @@ function ImportProgress({ progress }: { progress: ProgressState }) {
         <p className="text-[0.9rem] text-rvl-ink">{progress.label}</p>
         {progress.detail ? (
           <p className="mt-1 font-mono text-[0.68rem] text-rvl-ink-2">{progress.detail}</p>
+        ) : null}
+        {progress.failed && onViewError ? (
+          <button type="button" className={`${buttonClass} mt-3`} onClick={onViewError}>
+            View full error
+          </button>
         ) : null}
       </div>
       {progress.log.length > 0 ? (
@@ -214,16 +232,16 @@ function useSheetPreviewLoader() {
     const log: string[] = [];
 
     const bump = (label: string, detail?: string) => {
-      setProgress({ active: true, index, total, label, detail, log: [...log] });
+      setProgress({ active: true, failed: false, index, total, label, detail, log: [...log] });
     };
 
     const doneStep = (summary: string) => {
       log.push(summary);
       index += 1;
-      setProgress({ active: true, index, total, label: summary, log: [...log] });
+      setProgress({ active: true, failed: false, index, total, label: summary, log: [...log] });
     };
 
-    setProgress({ active: true, index: 0, total, label: "Starting…", log: [] });
+    setProgress({ active: true, failed: false, index: 0, total, label: "Starting…", log: [] });
 
     let masterTeams: Array<{ name: string; region: SheetRegion | null; playerNames: string[] }> = [];
     let masterGames: Array<{
@@ -352,9 +370,18 @@ function useSheetPreviewLoader() {
             : ""),
       );
 
+      setProgress(emptyProgress());
       return { preview: preview as Preview, sources };
-    } finally {
-      setProgress((current) => ({ ...current, active: false }));
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : "Unknown error";
+      setProgress((current) => ({
+        ...current,
+        active: true,
+        failed: true,
+        label: "Import step failed",
+        detail: detail.length > 160 ? `${detail.slice(0, 160)}…` : detail,
+      }));
+      throw error;
     }
   };
 
@@ -363,7 +390,7 @@ function useSheetPreviewLoader() {
 
 export function SeasonSheetImport() {
   const router = useRouter();
-  const showErrorToast = usePortalErrorToast();
+  const { showErrorDetail } = usePortalErrorToast();
   const [open, setOpen] = useState(false);
   const [step, setStep] = useState<"form" | "preview">("form");
   const [seasonNumber, setSeasonNumber] = useState("");
@@ -379,6 +406,9 @@ export function SeasonSheetImport() {
   const [excludedTeams, setExcludedTeams] = useState<Set<string>>(new Set());
   const [excludedGames, setExcludedGames] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
+  const [lastImportError, setLastImportError] = useState<{ title: string; error: unknown } | null>(
+    null,
+  );
 
   const { run, progress } = useSheetPreviewLoader();
   const runCommit = trpc.seasons.commitSheetImport.useMutation();
@@ -434,6 +464,7 @@ export function SeasonSheetImport() {
             onSubmit={async (event) => {
               event.preventDefault();
               setBusy(true);
+              setLastImportError(null);
               try {
                 const { preview: result, sources } = await run({
                   mode: "full",
@@ -450,7 +481,8 @@ export function SeasonSheetImport() {
                 setExcludedGames(new Set());
                 setStep("preview");
               } catch (error) {
-                showErrorToast("Preview failed", error);
+                setLastImportError({ title: "Preview failed", error });
+                showErrorDetail("Preview failed", error);
               } finally {
                 setBusy(false);
               }
@@ -511,7 +543,14 @@ export function SeasonSheetImport() {
               setAsUrl={setAsUrl}
               masterRequired
             />
-            <ImportProgress progress={progress} />
+            <ImportProgress
+              progress={progress}
+              onViewError={
+                lastImportError
+                  ? () => showErrorDetail(lastImportError.title, lastImportError.error)
+                  : undefined
+              }
+            />
             <DialogFooter className="-mx-5 -mb-5">
               <button type="submit" className={primaryClass} disabled={busy}>
                 {busy ? "Working…" : "Preview"}
@@ -560,7 +599,8 @@ export function SeasonSheetImport() {
                     reset();
                     router.refresh();
                   } catch (error) {
-                    showErrorToast("Import failed", error);
+                    setLastImportError({ title: "Import failed", error });
+                    showErrorDetail("Import failed", error);
                   }
                 }}
               >
@@ -580,7 +620,7 @@ export function TeamsSheetImport({
   seasons: { id: number; label: string }[];
 }) {
   const router = useRouter();
-  const showErrorToast = usePortalErrorToast();
+  const { showErrorDetail } = usePortalErrorToast();
   const [open, setOpen] = useState(false);
   const [step, setStep] = useState<"form" | "preview">("form");
   const [mode, setMode] = useState<TeamMode>("teams_and_players");
@@ -593,6 +633,9 @@ export function TeamsSheetImport({
   const [stagedSources, setStagedSources] = useState<StagedSources | null>(null);
   const [excludedTeams, setExcludedTeams] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
+  const [lastImportError, setLastImportError] = useState<{ title: string; error: unknown } | null>(
+    null,
+  );
 
   const { run, progress } = useSheetPreviewLoader();
   const runCommit = trpc.teams.commitSheetImport.useMutation();
@@ -645,6 +688,7 @@ export function TeamsSheetImport({
             onSubmit={async (event) => {
               event.preventDefault();
               setBusy(true);
+              setLastImportError(null);
               try {
                 const { preview: result, sources } = await run({
                   mode,
@@ -657,7 +701,8 @@ export function TeamsSheetImport({
                 setExcludedTeams(new Set());
                 setStep("preview");
               } catch (error) {
-                showErrorToast("Preview failed", error);
+                setLastImportError({ title: "Preview failed", error });
+                showErrorDetail("Preview failed", error);
               } finally {
                 setBusy(false);
               }
@@ -701,7 +746,14 @@ export function TeamsSheetImport({
               setAsUrl={setAsUrl}
               masterRequired={false}
             />
-            <ImportProgress progress={progress} />
+            <ImportProgress
+              progress={progress}
+              onViewError={
+                lastImportError
+                  ? () => showErrorDetail(lastImportError.title, lastImportError.error)
+                  : undefined
+              }
+            />
             <DialogFooter className="-mx-5 -mb-5">
               <button type="submit" className={primaryClass} disabled={busy}>
                 {busy ? "Working…" : "Preview"}
@@ -743,7 +795,8 @@ export function TeamsSheetImport({
                     reset();
                     router.refresh();
                   } catch (error) {
-                    showErrorToast("Import failed", error);
+                    setLastImportError({ title: "Import failed", error });
+                    showErrorDetail("Import failed", error);
                   }
                 }}
               >
