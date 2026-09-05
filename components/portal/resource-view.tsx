@@ -208,7 +208,7 @@ function EntityDialog({
   onSubmit: (values: Values) => Promise<unknown>;
 }) {
   const router = useRouter();
-  const showErrorToast = usePortalErrorToast();
+  const { showErrorToast } = usePortalErrorToast();
   const [open, setOpen] = useState(false);
   const [values, setValues] = useState<Values>(initial);
   const [pending, setPending] = useState(false);
@@ -289,7 +289,7 @@ export function ResourceView<Row extends { id: number | string }>({
   extra,
 }: ResourceViewProps<Row>) {
   const router = useRouter();
-  const showErrorToast = usePortalErrorToast();
+  const { showErrorToast } = usePortalErrorToast();
   const [deleting, setDeleting] = useState<Row["id"] | null>(null);
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);

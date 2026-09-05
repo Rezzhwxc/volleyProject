@@ -174,26 +174,23 @@ describe("parseMasterScheduleTab", () => {
     expect(games[1]?.forfeit).toBe(true);
   });
 
-  it("skips zero-set playoff rows and reads real set totals", () => {
+  it("skips zero-set playoff rows and ignores placeholder team names", () => {
     const csv = [
       `"","Losers Finals","","TT9","0","0"`,
       `"","Losers Finals","","0 0","0","0"`,
       `"","Grand-Finals","","TT9","25","25"`,
-      `"","Grand-Finals","","0 0","20","18"`,
+      `"","Grand-Finals","","Mambas","20","18"`,
     ].join("\n");
 
     const { games } = parseMasterScheduleTab(csv, "na", "playoffs", 2026);
     expect(games.every((game) => (game.team1Score ?? 0) + (game.team2Score ?? 0) > 0)).toBe(true);
+    expect(games.every((game) => !/^(?:0(?:\s+0)*)$/i.test(game.team1Name) && !/^(?:0(?:\s+0)*)$/i.test(game.team2Name))).toBe(true);
     const tt9 = games.find(
-      (game) =>
-        (game.team1Name === "TT9" && game.team2Name === "0 0") ||
-        (game.team2Name === "TT9" && game.team1Name === "0 0"),
+      (game) => game.team1Name === "TT9" || game.team2Name === "TT9",
     );
     expect(tt9).toBeDefined();
     const tt9Sets = tt9!.team1Name === "TT9" ? tt9!.team1Score : tt9!.team2Score;
-    const zeroSets = tt9!.team1Name === "0 0" ? tt9!.team1Score : tt9!.team2Score;
     expect(tt9Sets).toBe(2);
-    expect(zeroSets).toBe(0);
   });
 });
 
@@ -377,7 +374,7 @@ describe("matchStatsToGames", () => {
     expect(matched.warnings).toHaveLength(0);
   });
 
-  it("synthesizes a schedule row from a stats block when the bracket omitted the match", () => {
+  it("ignores stats blocks attributed to placeholder bracket cells", () => {
     const matched = matchStatsToGames([], [
       {
         teamName: "0 0",
@@ -405,9 +402,7 @@ describe("matchStatsToGames", () => {
         ],
       },
     ]);
-    expect(matched.syntheticGames).toHaveLength(1);
-    expect(matched.syntheticGames[0]?.team2Name).toBe("TT9");
-    expect(matched.stats).toHaveLength(1);
-    expect(matched.warnings).toHaveLength(0);
+    expect(matched.syntheticGames).toHaveLength(0);
+    expect(matched.stats).toHaveLength(0);
   });
 });

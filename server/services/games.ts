@@ -1,6 +1,6 @@
 import { and, asc, desc, eq, inArray, isNotNull, or, sql } from "drizzle-orm";
 import type { Db } from "@db";
-import { insertMany, chunkIds } from "@db/insert";
+import { insertMany, chunkIds, chunkValues } from "@db/insert";
 import {
   gameStaff,
   games,
@@ -367,10 +367,14 @@ function assertTeamRequirement(status: GameStatus, count: number) {
 
 async function assertTeamsInSeason(db: Db, seasonId: number, ids: number[]) {
   if (ids.length === 0) return [];
-  const linked = await db
-    .select()
-    .from(teams)
-    .where(and(eq(teams.seasonId, seasonId), inArray(teams.id, ids)));
+  const linked = [];
+  for (const chunk of chunkIds(ids)) {
+    const part = await db
+      .select()
+      .from(teams)
+      .where(and(eq(teams.seasonId, seasonId), inArray(teams.id, chunk)));
+    linked.push(...part);
+  }
   if (linked.length !== ids.length) {
     const missing = ids.filter((id) => !linked.some((team) => team.id === id));
     throw new NotFoundError(`Teams ${missing.join(", ")}`);
@@ -431,13 +435,16 @@ export async function getById(db: Db, id: number) {
   ]);
 
   const teamIds = gameTeams.map((team) => team.id);
-  const roster =
-    teamIds.length === 0
-      ? []
-      : await db
-          .select({ teamId: teamsPlayers.teamId, playerId: teamsPlayers.playerId })
-          .from(teamsPlayers)
-          .where(inArray(teamsPlayers.teamId, teamIds));
+  const roster = [];
+  if (teamIds.length > 0) {
+    for (const chunk of chunkIds(teamIds)) {
+      const part = await db
+        .select({ teamId: teamsPlayers.teamId, playerId: teamsPlayers.playerId })
+        .from(teamsPlayers)
+        .where(inArray(teamsPlayers.teamId, chunk));
+      roster.push(...part);
+    }
+  }
 
   const playerIdsByTeam = new Map<number, number[]>();
   for (const row of roster) {
@@ -533,7 +540,11 @@ export async function createByNames(
   db: Db,
   input: Omit<GameInput, "teamIds" | "team1Id" | "team2Id"> & { teamNames: string[] },
 ) {
-  const linked = await db.select().from(teams).where(inArray(teams.name, input.teamNames));
+  const linked = [];
+  for (const chunk of chunkValues(input.teamNames)) {
+    const part = await db.select().from(teams).where(inArray(teams.name, chunk));
+    linked.push(...part);
+  }
   if (linked.length !== input.teamNames.length) {
     const missing = input.teamNames.filter((name) => !linked.some((team) => team.name === name));
     throw new NotFoundError(`Teams ${missing.join(", ")}`);

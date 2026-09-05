@@ -1,7 +1,7 @@
 import { and, asc, eq, inArray, sql } from "drizzle-orm";
 import type { Db } from "@db";
 import { correlatedCount } from "@db/sqlx";
-import { insertMany } from "@db/insert";
+import { insertMany, chunkValues } from "@db/insert";
 import {
   account,
   awards,
@@ -176,12 +176,12 @@ export async function createMany(db: Db, input: PlayerInput[]) {
     position: player.position ?? "N/A",
   }));
   await insertMany(db, players, rows);
-  return db.select().from(players).where(
-    inArray(
-      players.name,
-      rows.map((row) => row.name),
-    ),
-  );
+  const matched = [];
+  for (const chunk of chunkValues(rows.map((row) => row.name))) {
+    const part = await db.select().from(players).where(inArray(players.name, chunk));
+    matched.push(...part);
+  }
+  return matched;
 }
 
 export async function createManyByTeamName(

@@ -90,7 +90,7 @@ const COLUMNS: ColumnSpec<Row>[] = [
 
 function ChallongeImport({ seasons }: { seasons: { id: number; label: string }[] }) {
   const router = useRouter();
-  const showErrorToast = usePortalErrorToast();
+  const { showErrorToast } = usePortalErrorToast();
   const [open, setOpen] = useState(false);
   const [tournamentId, setTournamentId] = useState("");
   const [seasonId, setSeasonId] = useState("");

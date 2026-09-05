@@ -1,6 +1,6 @@
 import { and, eq, inArray, sql } from "drizzle-orm";
 import type { Db } from "@db";
-import { insertManyIgnore, insertStatsIgnoreBatch, type StatInsertRow } from "@db/insert";
+import { chunkValues, insertManyIgnore, insertStatsIgnoreBatch, type StatInsertRow } from "@db/insert";
 import { games, players, seasons, stats, teams, teamsGames, teamsPlayers } from "@db/schema";
 import { BadRequestError, NotFoundError } from "../errors";
 import type { RecordsJobMessage } from "../../queue";
@@ -300,9 +300,7 @@ export async function commitSheetImport(
     const playerCache = new Map<string, number>();
     const allNames = [...new Set(preview.stats.map((row) => row.playerName.toLowerCase()))];
     if (allNames.length > 0) {
-      const chunkSize = 80;
-      for (let index = 0; index < allNames.length; index += chunkSize) {
-        const chunk = allNames.slice(index, index + chunkSize);
+      for (const chunk of chunkValues(allNames)) {
         const rows = await db.select().from(players).where(inArray(players.name, chunk));
         for (const row of rows) playerCache.set(row.name, row.id);
       }

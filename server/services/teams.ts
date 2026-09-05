@@ -1,7 +1,7 @@
 import { and, asc, eq, inArray, sql } from "drizzle-orm";
 import type { Db } from "@db";
 import { correlatedCount } from "@db/sqlx";
-import { insertMany } from "@db/insert";
+import { insertMany, chunkValues } from "@db/insert";
 import {
   games,
   players,
@@ -172,7 +172,12 @@ export async function create(db: Db, input: TeamInput) {
 export async function createMany(db: Db, input: TeamInput[]) {
   await insertMany(db, teams, input);
   const names = input.map((team) => team.name);
-  return db.select().from(teams).where(inArray(teams.name, names));
+  const matched = [];
+  for (const chunk of chunkValues(names)) {
+    const part = await db.select().from(teams).where(inArray(teams.name, chunk));
+    matched.push(...part);
+  }
+  return matched;
 }
 
 export async function update(db: Db, id: number, input: PartialInput<TeamInput>) {
