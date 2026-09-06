@@ -1,14 +1,29 @@
 import { and, eq, inArray, sql } from "drizzle-orm";
 import type { Db } from "@db";
-import { chunkValues, insertManyIgnore, insertStatsIgnoreBatch, type StatInsertRow } from "@db/insert";
+import {
+  chunkIds,
+  chunkValues,
+  insertManyIgnore,
+  insertManyReturning,
+  insertStatsIgnoreBatch,
+  runD1Batch,
+  type StatInsertRow,
+} from "@db/insert";
 import { games, players, seasons, stats, teams, teamsGames, teamsPlayers } from "@db/schema";
+import type { TeamLeadershipRole } from "@db/schema";
 import { BadRequestError, NotFoundError } from "../errors";
 import type { RecordsJobMessage } from "../../queue";
 import { assembleSheetImportPreview, buildSheetImportPreview, assertPreviewCommitable } from "./preview";
 import type { FetchImpl } from "./fetch";
 import { importKeyFromStoredGame } from "./keys";
 import { normalizeName } from "./names";
-import type { SheetImportCommitResult, SheetImportInput, SheetImportPreview } from "./types";
+import type {
+  PreviewGame,
+  PreviewTeam,
+  SheetImportCommitResult,
+  SheetImportInput,
+  SheetImportPreview,
+} from "./types";
 import type { SheetRegion } from "./types";
 
 interface StoredGameTeams {
@@ -20,6 +35,44 @@ interface StoredGameTeams {
   team2Score: number | null;
   team1Name?: string;
   team2Name?: string;
+}
+
+type RosterLink = { teamId: number; playerId: number };
+type RoleAssignment = { teamId: number; playerId: number; role: TeamLeadershipRole };
+type GameTeamLink = { gameId: number; teamId: number; slot: 1 | 2 };
+
+const ROLE_UPDATE_SQL =
+  "UPDATE teams_players SET role = ? WHERE team_id = ? AND player_id = ?";
+
+function rosterKey(link: RosterLink): string {
+  return `${link.teamId}:${link.playerId}`;
+}
+
+function dedupeRosterLinks(links: RosterLink[]): RosterLink[] {
+  const seen = new Set<string>();
+  const unique: RosterLink[] = [];
+  for (const link of links) {
+    const key = rosterKey(link);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    unique.push(link);
+  }
+  return unique;
+}
+
+function collectPlayerNames(activeTeams: PreviewTeam[], preview: SheetImportPreview): string[] {
+  const names = new Set<string>();
+  for (const team of activeTeams) {
+    for (const playerName of team.playerNames) names.add(playerName);
+    if (team.leadership) {
+      for (const role of ["C", "VC", "CC"] as const) {
+        const captain = team.leadership[role];
+        if (captain) names.add(captain);
+      }
+    }
+  }
+  for (const row of preview.stats) names.add(row.playerName);
+  return [...names];
 }
 
 async function loadExistingGameIdByKey(db: Db, seasonId: number): Promise<Map<string, number>> {
@@ -105,6 +158,32 @@ async function resolvePlayerIds(
   return { ids, created: missing.length };
 }
 
+async function resolveTeamIds(
+  db: Db,
+  seasonId: number,
+  names: string[],
+  existing: Map<string, number>,
+): Promise<number> {
+  const missing = names.filter((name) => !existing.has(normalizeName(name)));
+  if (missing.length === 0) return 0;
+
+  await insertManyIgnore(
+    db,
+    teams,
+    missing.map((name) => ({ name, seasonId, placement: "Didnt make playoffs" })),
+  );
+
+  for (const chunk of chunkValues(missing)) {
+    const rows = await db
+      .select()
+      .from(teams)
+      .where(and(eq(teams.seasonId, seasonId), inArray(teams.name, chunk)));
+    for (const row of rows) existing.set(normalizeName(row.name), row.id);
+  }
+
+  return missing.length;
+}
+
 function applyPreviewExcludes(
   preview: SheetImportPreview,
   input: SheetImportInput,
@@ -125,6 +204,178 @@ function applyPreviewExcludes(
   const stats = preview.stats.filter((stat) => activeGameKeys.has(stat.gameKey));
 
   return { ...preview, teams, games, stats };
+}
+
+function gameInsertRow(game: PreviewGame, seasonId: number) {
+  const status = game.team1Score != null && game.team2Score != null ? "completed" : "scheduled";
+  return {
+    name: `${game.team1Name} Vs. ${game.team2Name}`,
+    matchNumber: game.round,
+    round: game.round,
+    status: status as "completed" | "scheduled",
+    phase: game.phase,
+    region: game.region,
+    date: game.date,
+    seasonId,
+    team1Score: game.team1Score,
+    team2Score: game.team2Score,
+    set1Score: game.setScores[0] ?? null,
+    set2Score: game.setScores[1] ?? null,
+    set3Score: game.setScores[2] ?? null,
+    set4Score: game.setScores[3] ?? null,
+    set5Score: game.setScores[4] ?? null,
+    stage: game.phase === "playoffs" ? game.round : "Qualifiers",
+  };
+}
+
+async function importGamesBatch(
+  db: Db,
+  seasonId: number,
+  activeGames: PreviewGame[],
+  teamIdByName: Map<string, number>,
+  gameIdByKey: Map<string, number>,
+  warnings: string[],
+): Promise<{ gamesCreated: number; teamGameLinks: GameTeamLink[] }> {
+  const gamesToInsert: ReturnType<typeof gameInsertRow>[] = [];
+  const pendingGames: { key: string; team1Id: number; team2Id: number }[] = [];
+  const teamGameLinks: GameTeamLink[] = [];
+
+  for (const game of activeGames) {
+    const team1Id = teamIdByName.get(normalizeName(game.team1Name));
+    const team2Id = teamIdByName.get(normalizeName(game.team2Name));
+    if (!team1Id || !team2Id) {
+      warnings.push(`Skipped game ${game.team1Name} vs ${game.team2Name} (missing team ids)`);
+      continue;
+    }
+
+    const existingGameId = gameIdByKey.get(game.key);
+    if (existingGameId != null) {
+      teamGameLinks.push(
+        { gameId: existingGameId, teamId: team1Id, slot: 1 },
+        { gameId: existingGameId, teamId: team2Id, slot: 2 },
+      );
+      continue;
+    }
+
+    gamesToInsert.push(gameInsertRow(game, seasonId));
+    pendingGames.push({ key: game.key, team1Id, team2Id });
+  }
+
+  let gamesCreated = 0;
+  if (gamesToInsert.length > 0) {
+    const created = await insertManyReturning(db, games, gamesToInsert);
+    for (let index = 0; index < created.length; index += 1) {
+      const row = created[index];
+      const pending = pendingGames[index];
+      if (!row || !pending) continue;
+
+      gameIdByKey.set(pending.key, row.id);
+      gamesCreated += 1;
+      teamGameLinks.push(
+        { gameId: row.id, teamId: pending.team1Id, slot: 1 },
+        { gameId: row.id, teamId: pending.team2Id, slot: 2 },
+      );
+    }
+  }
+
+  return { gamesCreated, teamGameLinks };
+}
+
+async function attachRostersAndLeadership(
+  db: Db,
+  d1: D1Database | undefined,
+  activeTeams: PreviewTeam[],
+  teamIdByName: Map<string, number>,
+  playerIdsByName: Map<string, number>,
+  input: SheetImportInput,
+  warnings: string[],
+): Promise<number> {
+  const rosterLinks: RosterLink[] = [];
+  const roleAssignments: RoleAssignment[] = [];
+  const teamIdsToClear = new Set<number>();
+
+  for (const team of activeTeams) {
+    const teamId = teamIdByName.get(normalizeName(team.name));
+    if (!teamId) {
+      if (input.mode === "players") {
+        warnings.push(`Skipped players for missing team "${team.name}"`);
+        continue;
+      }
+      throw new BadRequestError(`Team "${team.name}" was not created`);
+    }
+
+    const seenOnTeam = new Set<number>();
+    for (const playerName of team.playerNames) {
+      const playerId = playerIdsByName.get(playerName.toLowerCase());
+      if (!playerId) {
+        throw new BadRequestError(`Could not resolve player "${playerName}"`);
+      }
+      if (seenOnTeam.has(playerId)) continue;
+      seenOnTeam.add(playerId);
+      rosterLinks.push({ teamId, playerId });
+    }
+
+    if (team.leadership) {
+      teamIdsToClear.add(teamId);
+      for (const role of ["C", "VC", "CC"] as const) {
+        const captain = team.leadership[role];
+        if (!captain) continue;
+        const playerId = playerIdsByName.get(captain.toLowerCase());
+        if (!playerId) {
+          warnings.push(
+            `Could not assign ${role} on "${team.name}" — player "${captain}" missing from roster`,
+          );
+          continue;
+        }
+        if (!seenOnTeam.has(playerId)) {
+          rosterLinks.push({ teamId, playerId });
+          seenOnTeam.add(playerId);
+        }
+        roleAssignments.push({ teamId, playerId, role });
+      }
+    } else if (team.playerNames.length > 0) {
+      warnings.push(
+        `No captaincy (C/VC/CC) found for "${team.name}" — check the master TEAMS header row`,
+      );
+    }
+  }
+
+  const uniqueLinks = dedupeRosterLinks(rosterLinks);
+  if (uniqueLinks.length > 0) {
+    await insertManyIgnore(db, teamsPlayers, uniqueLinks);
+  }
+
+  if (teamIdsToClear.size > 0) {
+    for (const chunk of chunkIds([...teamIdsToClear])) {
+      await db
+        .update(teamsPlayers)
+        .set({ role: sql`NULL` })
+        .where(and(inArray(teamsPlayers.teamId, chunk), sql`${teamsPlayers.role} is not null`));
+    }
+  }
+
+  if (roleAssignments.length > 0 && d1) {
+    await runD1Batch(
+      d1,
+      roleAssignments.map((assignment) =>
+        d1.prepare(ROLE_UPDATE_SQL).bind(assignment.role, assignment.teamId, assignment.playerId),
+      ),
+    );
+  } else {
+    for (const assignment of roleAssignments) {
+      await db
+        .update(teamsPlayers)
+        .set({ role: assignment.role })
+        .where(
+          and(
+            eq(teamsPlayers.teamId, assignment.teamId),
+            eq(teamsPlayers.playerId, assignment.playerId),
+          ),
+        );
+    }
+  }
+
+  return uniqueLinks.length;
 }
 
 export async function commitSheetImport(
@@ -194,206 +445,75 @@ export async function commitSheetImport(
   let statsCreated = 0;
 
   const teamIdByName = new Map<string, number>();
-
-  // Load existing season teams for players-only / merge
   const existingTeams = await db.select().from(teams).where(eq(teams.seasonId, seasonId));
   for (const team of existingTeams) {
     teamIdByName.set(normalizeName(team.name), team.id);
   }
 
   const activeTeams = preview.teams.filter((team) => team.included);
+  const activeGames = preview.games.filter((game) => game.included);
 
   if (includeTeams) {
-    const missingTeams = activeTeams.filter((team) => !teamIdByName.has(normalizeName(team.name)));
-    if (missingTeams.length > 0) {
-      await insertManyIgnore(
-        db,
-        teams,
-        missingTeams.map((team) => ({
-          name: team.name,
-          seasonId,
-          placement: "Didnt make playoffs",
-        })),
-      );
-      teamsCreated = missingTeams.length;
-      for (const chunk of chunkValues(missingTeams.map((team) => team.name))) {
-        const rows = await db
-          .select()
-          .from(teams)
-          .where(and(eq(teams.seasonId, seasonId), inArray(teams.name, chunk)));
-        for (const row of rows) teamIdByName.set(normalizeName(row.name), row.id);
-      }
-    }
+    teamsCreated = await resolveTeamIds(
+      db,
+      seasonId,
+      activeTeams.map((team) => team.name),
+      teamIdByName,
+    );
+  }
+
+  let playerIdsByName = new Map<string, number>();
+  if (includePlayers || includeStats) {
+    const resolved = await resolvePlayerIds(db, collectPlayerNames(activeTeams, preview));
+    playerIdsByName = resolved.ids;
+    playersCreated = resolved.created;
   }
 
   if (includePlayers) {
-    const allPlayerNames = activeTeams.flatMap((team) => {
-      const names = [...team.playerNames];
-      if (team.leadership) {
-        for (const role of ["C", "VC", "CC"] as const) {
-          const captain = team.leadership[role];
-          if (captain && !names.some((name) => normalizeName(name) === normalizeName(captain))) {
-            names.unshift(captain);
-          }
-        }
-      }
-      return names;
-    });
-    const { ids: playerIdsByName, created: bulkPlayersCreated } = await resolvePlayerIds(
+    playersAttached = await attachRostersAndLeadership(
       db,
-      allPlayerNames,
+      options.d1,
+      activeTeams,
+      teamIdByName,
+      playerIdsByName,
+      input,
+      preview.warnings,
     );
-    playersCreated += bulkPlayersCreated;
-
-    for (const team of activeTeams) {
-      const teamId = teamIdByName.get(normalizeName(team.name));
-      if (!teamId) {
-        if (input.mode === "players") {
-          preview.warnings.push(`Skipped players for missing team "${team.name}"`);
-          continue;
-        }
-        throw new BadRequestError(`Team "${team.name}" was not created`);
-      }
-
-      const roleByPlayer = new Map<string, "C" | "VC" | "CC">();
-      if (team.leadership) {
-        for (const role of ["C", "VC", "CC"] as const) {
-          const captain = team.leadership[role];
-          if (!captain) continue;
-          roleByPlayer.set(normalizeName(captain), role);
-        }
-      }
-
-      const rosterLinks: { teamId: number; playerId: number }[] = [];
-      for (const playerName of team.playerNames) {
-        const playerId = playerIdsByName.get(playerName.toLowerCase());
-        if (!playerId) {
-          throw new BadRequestError(`Could not resolve player "${playerName}"`);
-        }
-        rosterLinks.push({ teamId, playerId });
-      }
-      if (team.leadership) {
-        for (const role of ["C", "VC", "CC"] as const) {
-          const captain = team.leadership[role];
-          if (!captain) continue;
-          const playerId = playerIdsByName.get(captain.toLowerCase());
-          if (playerId) rosterLinks.push({ teamId, playerId });
-        }
-      }
-      await insertManyIgnore(db, teamsPlayers, rosterLinks);
-      playersAttached += rosterLinks.length;
-
-      // Assign leadership after the roster is linked so unique role slots stay consistent.
-      if (roleByPlayer.size > 0) {
-        await db
-          .update(teamsPlayers)
-          .set({ role: sql`NULL` })
-          .where(and(eq(teamsPlayers.teamId, teamId), sql`${teamsPlayers.role} is not null`));
-        const seat = await db
-          .select({ playerId: teamsPlayers.playerId, name: players.name })
-          .from(teamsPlayers)
-          .innerJoin(players, eq(teamsPlayers.playerId, players.id))
-          .where(eq(teamsPlayers.teamId, teamId));
-        for (const [playerKey, role] of roleByPlayer) {
-          const match = seat.find((row) => normalizeName(row.name) === playerKey);
-          if (!match) {
-            preview.warnings.push(
-              `Could not assign ${role} on "${team.name}" — player "${playerKey}" missing from roster`,
-            );
-            continue;
-          }
-          await db
-            .update(teamsPlayers)
-            .set({ role })
-            .where(and(eq(teamsPlayers.teamId, teamId), eq(teamsPlayers.playerId, match.playerId)));
-        }
-      } else if (team.playerNames.length > 0) {
-        preview.warnings.push(
-          `No captaincy (C/VC/CC) found for "${team.name}" — check the master TEAMS header row`,
-        );
-      }
-    }
   }
 
-  const gameIdByKey =
-    includeGames && seasonId != null
-      ? await loadExistingGameIdByKey(db, seasonId)
-      : new Map<string, number>();
+  const gameIdByKey = includeGames ? await loadExistingGameIdByKey(db, seasonId) : new Map<string, number>();
 
   if (includeGames) {
-    for (const game of preview.games.filter((row) => row.included)) {
-      const team1Id = teamIdByName.get(normalizeName(game.team1Name));
-      const team2Id = teamIdByName.get(normalizeName(game.team2Name));
-      if (!team1Id || !team2Id) {
-        preview.warnings.push(
-          `Skipped game ${game.team1Name} vs ${game.team2Name} (missing team ids)`,
-        );
-        continue;
-      }
-
-      const existingGameId = gameIdByKey.get(game.key);
-      if (existingGameId != null) {
-        await insertManyIgnore(db, teamsGames, [
-          { gameId: existingGameId, teamId: team1Id, slot: 1 },
-          { gameId: existingGameId, teamId: team2Id, slot: 2 },
-        ]);
-        continue;
-      }
-
-      const status = game.team1Score != null && game.team2Score != null ? "completed" : "scheduled";
-      const [created] = await db
-        .insert(games)
-        .values({
-          name: `${game.team1Name} Vs. ${game.team2Name}`,
-          matchNumber: game.round,
-          round: game.round,
-          status,
-          phase: game.phase,
-          region: game.region,
-          date: game.date,
-          seasonId,
-          team1Score: game.team1Score,
-          team2Score: game.team2Score,
-          set1Score: game.setScores[0] ?? null,
-          set2Score: game.setScores[1] ?? null,
-          set3Score: game.setScores[2] ?? null,
-          set4Score: game.setScores[3] ?? null,
-          set5Score: game.setScores[4] ?? null,
-          stage: game.phase === "playoffs" ? game.round : "Qualifiers",
-        })
-        .returning();
-
-      if (!created) continue;
-      await insertManyIgnore(db, teamsGames, [
-        { gameId: created.id, teamId: team1Id, slot: 1 },
-        { gameId: created.id, teamId: team2Id, slot: 2 },
-      ]);
-      gameIdByKey.set(game.key, created.id);
-      gamesCreated += 1;
+    const imported = await importGamesBatch(
+      db,
+      seasonId,
+      activeGames,
+      teamIdByName,
+      gameIdByKey,
+      preview.warnings,
+    );
+    gamesCreated = imported.gamesCreated;
+    if (imported.teamGameLinks.length > 0) {
+      await insertManyIgnore(db, teamsGames, imported.teamGameLinks);
     }
   }
 
   if (includeStats) {
-    const statPlayerNames = preview.stats.map((row) => row.playerName);
-    const { ids: playerCache, created: statPlayersCreated } = await resolvePlayerIds(
-      db,
-      statPlayerNames,
-    );
-    playersCreated += statPlayersCreated;
-
     const statRows: StatInsertRow[] = [];
     const seenStatKeys = new Set<string>();
-    const rosterLinks: { teamId: number; playerId: number }[] = [];
+    const statRosterLinks: RosterLink[] = [];
 
     for (const row of preview.stats) {
       const gameId = gameIdByKey.get(row.gameKey);
       if (!gameId) continue;
 
-      const playerId = playerCache.get(row.playerName.toLowerCase());
+      const playerId = playerIdsByName.get(row.playerName.toLowerCase());
       if (!playerId) continue;
 
-      const teamId = teamIdByName.get(normalizeName(row.teamName));
-      if (teamId) rosterLinks.push({ teamId, playerId });
+      if (!includePlayers) {
+        const teamId = teamIdByName.get(normalizeName(row.teamName));
+        if (teamId) statRosterLinks.push({ teamId, playerId });
+      }
 
       const statKey = `${playerId}:${gameId}`;
       if (seenStatKeys.has(statKey)) continue;
@@ -406,8 +526,8 @@ export async function commitSheetImport(
       });
     }
 
-    if (rosterLinks.length > 0) {
-      await insertManyIgnore(db, teamsPlayers, rosterLinks);
+    if (!includePlayers && statRosterLinks.length > 0) {
+      await insertManyIgnore(db, teamsPlayers, dedupeRosterLinks(statRosterLinks));
     }
 
     if (statRows.length > 0) {

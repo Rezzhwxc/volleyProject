@@ -1,4 +1,4 @@
-import { getTableColumns, type InferInsertModel } from "drizzle-orm";
+import { getTableColumns, type InferInsertModel, type InferSelectModel } from "drizzle-orm";
 import type { SQLiteTable } from "drizzle-orm/sqlite-core";
 import type { Db } from "./index";
 
@@ -62,6 +62,33 @@ export async function insertManyIgnore<TTable extends SQLiteTable>(
   const columnCount = boundColumnCount(table, rows);
   for (const chunk of chunkRows(rows, columnCount)) {
     await db.insert(table).values(chunk as never).onConflictDoNothing();
+  }
+}
+
+/** Chunked multi-row insert that returns created rows (order matches input). */
+export async function insertManyReturning<TTable extends SQLiteTable>(
+  db: Db,
+  table: TTable,
+  rows: InferInsertModel<TTable>[],
+): Promise<InferSelectModel<TTable>[]> {
+  if (rows.length === 0) return [];
+  const columnCount = boundColumnCount(table, rows);
+  const created: InferSelectModel<TTable>[] = [];
+  for (const chunk of chunkRows(rows, columnCount)) {
+    const part = await db.insert(table).values(chunk as never).returning();
+    created.push(...(part as InferSelectModel<TTable>[]));
+  }
+  return created;
+}
+
+/** Run up to 50 D1 prepared statements per batch call. */
+export async function runD1Batch(
+  d1: D1Database,
+  statements: D1PreparedStatement[],
+): Promise<void> {
+  if (statements.length === 0) return;
+  for (let index = 0; index < statements.length; index += D1_MAX_BATCH_STATEMENTS) {
+    await d1.batch(statements.slice(index, index + D1_MAX_BATCH_STATEMENTS));
   }
 }
 
