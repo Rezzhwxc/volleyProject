@@ -13,6 +13,7 @@ import {
   type TeamLeadershipRole,
 } from "@db/schema";
 import { ConflictError, found } from "./errors";
+import type { GameRegion } from "./games";
 import type { PartialInput } from "./input";
 import { isAdmin } from "./users";
 
@@ -48,12 +49,26 @@ const withSeason = {
   gameCount: correlatedCount("teams_games", "team_id", "teams", "id"),
 };
 
-export async function list(db: Db) {
-  return db
+async function teamIdsInRegion(db: Db, region: GameRegion) {
+  const rows = await db
+    .select({ teamId: teamsGames.teamId })
+    .from(teamsGames)
+    .innerJoin(games, eq(teamsGames.gameId, games.id))
+    .where(eq(games.region, region));
+  return [...new Set(rows.map((row) => row.teamId))];
+}
+
+export async function list(db: Db, region?: GameRegion) {
+  const query = db
     .select(withSeason)
     .from(teams)
-    .leftJoin(seasons, eq(teams.seasonId, seasons.id))
-    .orderBy(asc(teams.name));
+    .leftJoin(seasons, eq(teams.seasonId, seasons.id));
+
+  if (!region) return query.orderBy(asc(teams.name));
+
+  const ids = await teamIdsInRegion(db, region);
+  if (ids.length === 0) return [];
+  return query.where(inArray(teams.id, ids)).orderBy(asc(teams.name));
 }
 
 export async function listBySeason(db: Db, seasonId: number) {
@@ -111,7 +126,14 @@ export async function listPlayers(db: Db, teamId: number) {
   return sortRoster(rows);
 }
 
-export async function listPlayersBySeason(db: Db, seasonId: number) {
+export async function listPlayersBySeason(db: Db, seasonId: number, region?: GameRegion) {
+  const filters = [eq(teams.seasonId, seasonId)];
+  if (region) {
+    const ids = await teamIdsInRegion(db, region);
+    if (ids.length === 0) return [];
+    filters.push(inArray(teams.id, ids));
+  }
+
   const rows = await db
     .select({
       teamId: teamsPlayers.teamId,
@@ -123,7 +145,7 @@ export async function listPlayersBySeason(db: Db, seasonId: number) {
     .from(teamsPlayers)
     .innerJoin(players, eq(teamsPlayers.playerId, players.id))
     .innerJoin(teams, eq(teamsPlayers.teamId, teams.id))
-    .where(eq(teams.seasonId, seasonId));
+    .where(and(...filters));
   return sortRoster(rows);
 }
 

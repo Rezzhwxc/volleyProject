@@ -1,10 +1,11 @@
 import type { Db } from "@db";
 import { cacheDelete, cacheRead, cacheWrite } from "../cache";
+import type { GameRegion } from "./games";
 import { avatarByUsername } from "./roblox";
 import * as stats from "./stats";
 
 export const HOME_NUMBERS_TTL = 60 * 60 * 24;
-const HOME_NUMBERS_KEY = "https://volley.internal/cache/home-numbers-season-v2";
+const HOME_NUMBERS_KEY = "https://volley.internal/cache/home-numbers-season-v3";
 
 const SEASON_METRICS = [
   { key: "totalKills", metric: "Kills · season" },
@@ -25,6 +26,7 @@ export interface HomeNumber {
 
 export interface HomeNumbersPayload {
   seasonId: number | null;
+  region: GameRegion | null;
   numbers: HomeNumber[];
   avatars: Record<string, string | null>;
 }
@@ -50,8 +52,9 @@ export async function computeHomeNumbers(
   db: Db,
   seasonId: number | null,
   avatarFor: AvatarLookup = defaultAvatar,
+  region?: GameRegion,
 ): Promise<HomeNumbersPayload> {
-  const leaders = seasonId ? await stats.leaderboard(db, { seasonId }) : [];
+  const leaders = seasonId ? await stats.leaderboard(db, { seasonId, region }) : [];
 
   const numbers = SEASON_METRICS.flatMap(({ key, metric }) => {
     const leader = leaderIn(leaders, key);
@@ -76,18 +79,24 @@ export async function computeHomeNumbers(
     ),
   );
 
-  return { seasonId, numbers, avatars };
+  return { seasonId, region: region ?? null, numbers, avatars };
 }
 
 export async function loadHomeNumbers(
   db: Db,
   seasonId: number | null,
-  options: { avatarFor?: AvatarLookup } = {},
+  options: { avatarFor?: AvatarLookup; region?: GameRegion | undefined } = {},
 ): Promise<HomeNumbersPayload> {
+  const region = options.region ?? null;
   const cached = await cacheRead<HomeNumbersPayload>(HOME_NUMBERS_KEY);
-  if (cached && cached.seasonId === seasonId) return cached;
+  if (cached && cached.seasonId === seasonId && cached.region === region) return cached;
 
-  const payload = await computeHomeNumbers(db, seasonId, options.avatarFor ?? defaultAvatar);
+  const payload = await computeHomeNumbers(
+    db,
+    seasonId,
+    options.avatarFor ?? defaultAvatar,
+    options.region,
+  );
   await cacheWrite(HOME_NUMBERS_KEY, payload, HOME_NUMBERS_TTL);
   return payload;
 }

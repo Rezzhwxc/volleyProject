@@ -10,19 +10,24 @@ import {
   gameCreateMany,
   gameImportChallonge,
   gameUpdate,
+  optionalRegion,
   optionalSeason,
 } from "../schemas";
 
 const schedulePaths = ["/schedules", "/portal/games", "/"];
 
 export const gamesRouter = router({
-  list: publicProcedure.query(({ ctx }) => games.list(ctx.db)),
+  list: publicProcedure
+    .input(optionalRegion)
+    .query(({ ctx, input }) => games.list(ctx.db, input?.region)),
 
-  listPlayed: publicProcedure.query(({ ctx }) => games.listPlayed(ctx.db)),
+  listPlayed: publicProcedure
+    .input(optionalRegion)
+    .query(({ ctx, input }) => games.listPlayed(ctx.db, input?.region)),
 
   listSchedule: publicProcedure
     .input(optionalSeason)
-    .query(({ ctx, input }) => games.listSchedule(ctx.db, input.seasonId)),
+    .query(({ ctx, input }) => games.listSchedule(ctx.db, input.seasonId, input.region)),
 
   byId: publicProcedure.input(byId).query(({ ctx, input }) => games.getById(ctx.db, input.id)),
 

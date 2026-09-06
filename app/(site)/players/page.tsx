@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { api } from "@server/trpc/server";
+import { getSiteRegionQuery } from "@server/site-region";
 import { EmptyState } from "@components/site/empty-state";
 import { PageHeader } from "@components/site/page-header";
 import { PlayersList, type PlayerListRow } from "@components/site/players-list";
@@ -12,10 +13,10 @@ export const metadata: Metadata = {
 };
 
 export default async function PlayersPage() {
-  const trpc = await api();
+  const [trpc, { query }] = await Promise.all([api(), getSiteRegionQuery()]);
   const [rows, memberships] = await Promise.all([
-    trpc.players.list(),
-    trpc.players.memberships(),
+    trpc.players.list(query),
+    trpc.players.memberships(query),
   ]);
 
   const teamsByPlayer = new Map<number, { name: string; seasonNumber: number | null }[]>();

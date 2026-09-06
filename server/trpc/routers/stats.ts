@@ -4,6 +4,7 @@ import { revalidate } from "../revalidate";
 import {
   byId,
   leaderboardInput,
+  optionalRegion,
   statCreate,
   statCreateByName,
   statRows,
@@ -19,10 +20,13 @@ export const statsRouter = router({
       stats.leaderboard(ctx.db, {
         seasonId: input.seasonId,
         stageRound: input.stageRound,
+        region: input.region,
       }),
     ),
 
-  vectorGraph: publicProcedure.query(({ ctx }) => stats.vectorGraph(ctx.db)),
+  vectorGraph: publicProcedure
+    .input(optionalRegion)
+    .query(({ ctx, input }) => stats.vectorGraph(ctx.db, input?.region)),
 
   count: adminProcedure.query(({ ctx }) => stats.count(ctx.db)),
 

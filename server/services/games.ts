@@ -119,9 +119,14 @@ const listColumns = {
   challongeRound: games.challongeRound,
 };
 
-function scheduleFilter(seasonId?: number) {
+function matchRegion(region?: GameRegion) {
+  return region ? eq(games.region, region) : undefined;
+}
+
+function scheduleFilter(seasonId?: number, region?: GameRegion) {
   const hasSchedule = or(isNotNull(games.matchNumber), eq(games.status, "scheduled"));
-  return seasonId === undefined ? hasSchedule : and(eq(games.seasonId, seasonId), hasSchedule);
+  const scoped = seasonId === undefined ? hasSchedule : and(eq(games.seasonId, seasonId), hasSchedule);
+  return and(scoped, matchRegion(region));
 }
 
 function toScheduleRow(
@@ -167,52 +172,53 @@ function toScheduleRow(
   };
 }
 
-export async function list(db: Db) {
+export async function list(db: Db, region?: GameRegion) {
   const rows = await db
     .select(listColumns)
     .from(games)
     .leftJoin(seasons, eq(games.seasonId, seasons.id))
+    .where(matchRegion(region))
     .orderBy(desc(games.date));
   return attachTeams(db, rows);
 }
 
-export async function listPlayed(db: Db) {
+export async function listPlayed(db: Db, region?: GameRegion) {
   const rows = await db
     .select(listColumns)
     .from(games)
     .leftJoin(seasons, eq(games.seasonId, seasons.id))
-    .where(eq(games.status, "completed"))
+    .where(and(eq(games.status, "completed"), matchRegion(region)))
     .orderBy(desc(games.date));
   return attachTeams(db, rows);
 }
 
-export async function listSchedule(db: Db, seasonId?: number) {
+export async function listSchedule(db: Db, seasonId?: number, region?: GameRegion) {
   const rows = await db
     .select(listColumns)
     .from(games)
     .leftJoin(seasons, eq(games.seasonId, seasons.id))
-    .where(scheduleFilter(seasonId))
+    .where(scheduleFilter(seasonId, region))
     .orderBy(asc(games.date));
   const withTeams = await attachTeams(db, rows);
   return withTeams.map(toScheduleRow);
 }
 
-export async function listBySeason(db: Db, seasonId: number) {
+export async function listBySeason(db: Db, seasonId: number, region?: GameRegion) {
   const rows = await db
     .select(listColumns)
     .from(games)
     .leftJoin(seasons, eq(games.seasonId, seasons.id))
-    .where(eq(games.seasonId, seasonId))
+    .where(and(eq(games.seasonId, seasonId), matchRegion(region)))
     .orderBy(asc(games.date));
   return attachTeams(db, rows);
 }
 
-export async function listByRound(db: Db, seasonId: number, round: string) {
+export async function listByRound(db: Db, seasonId: number, round: string, region?: GameRegion) {
   const rows = await db
     .select(listColumns)
     .from(games)
     .leftJoin(seasons, eq(games.seasonId, seasons.id))
-    .where(and(eq(games.seasonId, seasonId), eq(games.round, round)))
+    .where(and(eq(games.seasonId, seasonId), eq(games.round, round), matchRegion(region)))
     .orderBy(asc(games.date));
   return attachTeams(db, rows).then((items) => items.map(toScheduleRow));
 }

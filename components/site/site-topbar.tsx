@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { getSessionUser } from "@server/session";
+import { getSiteRegion } from "@server/site-region";
 import { isAdmin } from "@server/services/users";
 import { SiteAccount } from "./site-account";
 import { SiteHeaderChrome } from "./site-header-chrome";
@@ -7,13 +8,13 @@ import { SiteRegionSelect } from "./site-region-select";
 import { SiteTopbarNav } from "./site-topbar-nav";
 
 export async function SiteTopbar() {
-  const user = await getSessionUser();
+  const [user, region] = await Promise.all([getSessionUser(), getSiteRegion()]);
 
   return (
     <SiteHeaderChrome
       utility={
         <div className="flex h-[var(--site-utility-h)] w-full items-center gap-4 border-b border-rvl-line bg-rvl-panel px-5 sm:px-8 xl:px-14">
-          <SiteRegionSelect />
+          <SiteRegionSelect value={region} />
 
           <div className="ml-auto flex shrink-0 items-center gap-3 sm:gap-4">
             <a

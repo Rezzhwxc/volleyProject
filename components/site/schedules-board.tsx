@@ -139,16 +139,11 @@ export function SchedulesBoard({
 }) {
   const router = useRouter();
   const [search, setSearch] = useState("");
-  const [region, setRegion] = useState("");
   const [status, setStatus] = useState("");
   const [round, setRound] = useState("");
   const [page, setPage] = useState(1);
   const [collapsedDays, setCollapsedDays] = useState<Set<string>>(new Set());
 
-  const regions = useMemo(
-    () => [...new Set(matches.map((match) => match.region))].sort(),
-    [matches],
-  );
   const statuses = useMemo(
     () => [...new Set(matches.map((match) => match.status))].sort(),
     [matches],
@@ -161,12 +156,11 @@ export function SchedulesBoard({
         const haystack = `${match.team1Name ?? ""} ${match.team2Name ?? ""} ${match.matchNumber}`;
         return (
           haystack.toLowerCase().includes(search.toLowerCase()) &&
-          (!region || match.region === region) &&
           (!status || match.status === status) &&
           (!round || match.round === round)
         );
       }),
-    [matches, search, region, status, round],
+    [matches, search, status, round],
   );
 
   const byDate = useMemo(() => {
@@ -192,7 +186,6 @@ export function SchedulesBoard({
 
   const clearFilters = () => {
     setSearch("");
-    setRegion("");
     setStatus("");
     setRound("");
     setPage(1);
@@ -213,20 +206,6 @@ export function SchedulesBoard({
                 value: String(season.id),
                 label: `Season ${season.seasonNumber}`,
               })),
-            ]}
-          />
-
-          <FilterSelect
-            id="schedule-region"
-            label="Region"
-            value={region}
-            onChange={(value) => {
-              setRegion(value);
-              setPage(1);
-            }}
-            options={[
-              { value: "", label: "All regions" },
-              ...regions.map((value) => ({ value, label: value })),
             ]}
           />
 
@@ -258,7 +237,7 @@ export function SchedulesBoard({
             ]}
           />
 
-          {search || region || status || round ? (
+          {search || status || round ? (
             <ClearFiltersButton onClick={clearFilters} />
           ) : null}
         </div>

@@ -357,15 +357,30 @@ export const triviaSubject = z.object({
   seed: z.number().min(0).max(1),
 });
 
-export const bySeason = z.object({ seasonId: id });
+export const regionValue = z.enum(MATCH_REGIONS).optional();
+
+export const optionalRegion = z
+  .object({
+    region: regionValue,
+  })
+  .optional();
+
+export const bySeason = z.object({
+  seasonId: id,
+  region: regionValue,
+});
 export const byTeamName = z.object({ name: z.string().min(1) });
-export const optionalSeason = z.object({ seasonId: id.optional() });
+export const optionalSeason = z.object({
+  seasonId: id.optional(),
+  region: regionValue,
+});
 
 export const STAGE_ROUNDS = ["R1", "R2", "R3", "R4", "R5", "R6", "all"] as const;
 
 export const leaderboardInput = z.object({
   seasonId: id.optional(),
   stageRound: z.enum(STAGE_ROUNDS).optional(),
+  region: regionValue,
 });
 export const recordsByMetric = z.object({
   metric: z.enum(RECORD_METRICS),
