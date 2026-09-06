@@ -106,10 +106,71 @@ export const sheetImportSources = z.object({
   sourceWarnings: z.array(z.string()),
 });
 
-const sheetImportExcludes = {
+const previewTeam = z.object({
+  key: z.string(),
+  name: z.string(),
+  region: z.enum(["na", "eu", "as"]).nullable(),
+  playerNames: z.array(z.string()),
+  leadership: z
+    .object({
+      C: z.string().optional(),
+      VC: z.string().optional(),
+      CC: z.string().optional(),
+    })
+    .optional(),
+  included: z.boolean(),
+});
+
+const previewGame = parsedGame.extend({
+  matchedStatCount: z.number(),
+  included: z.boolean(),
+});
+
+const previewStat = z.object({
+  gameKey: z.string(),
+  teamName: z.string(),
+  playerName: z.string(),
+  counts: sheetStatCounts,
+});
+
+/** Staged preview from assemblePreview — commit uses this instead of re-parsing sources. */
+export const sheetImportPreviewSnapshot = z.object({
+  mode: z.enum(["full", "teams", "teams_and_players", "players"]),
+  seasonNumber: z.number().nullable(),
+  seasonId: z.number().nullable(),
+  counts: z.object({
+    teams: z.number(),
+    players: z.number(),
+    playersNew: z.number(),
+    playersExisting: z.number(),
+    games: z.number(),
+    stats: z.number(),
+    warnings: z.number(),
+    errors: z.number(),
+  }),
+  teams: z.array(previewTeam),
+  players: z.array(
+    z.object({
+      name: z.string(),
+      teamName: z.string(),
+      exists: z.boolean(),
+    }),
+  ),
+  games: z.array(previewGame),
+  stats: z.array(previewStat),
+  warnings: z.array(z.string()),
+  errors: z.array(z.string()),
+});
+
+const sheetImportFilters = {
   excludeTeamKeys: z.array(z.string()).optional(),
   excludeGameKeys: z.array(z.string()).optional(),
+};
+
+const sheetImportCommitExtras = {
+  ...sheetImportFilters,
   sources: sheetImportSources.optional(),
+  preview: sheetImportPreviewSnapshot.optional(),
 };
 
 const sheetImportFullShape = {
@@ -120,7 +181,7 @@ const sheetImportFullShape = {
   theme: z.string().min(1).nullable().optional(),
   masterUrl: sheetUrl.optional(),
   regionalUrls,
-  ...sheetImportExcludes,
+  ...sheetImportCommitExtras,
 } as const;
 
 const sheetImportTeamsShape = {
@@ -128,14 +189,14 @@ const sheetImportTeamsShape = {
   seasonId: id,
   masterUrl: sheetUrl.optional(),
   regionalUrls,
-  ...sheetImportExcludes,
+  ...sheetImportCommitExtras,
 } as const;
 
 export const sheetImportFull = z.object(sheetImportFullShape).superRefine((data, ctx) => {
-  if (!data.sources && !data.masterUrl) {
+  if (!data.preview && !data.sources && !data.masterUrl) {
     ctx.addIssue({
       code: "custom",
-      message: "Provide staged sources from preview or a master sheet URL",
+      message: "Provide staged preview, sources from preview, or a master sheet URL",
       path: ["masterUrl"],
     });
   }
@@ -143,6 +204,7 @@ export const sheetImportFull = z.object(sheetImportFullShape).superRefine((data,
 
 export const sheetImportTeams = z.object(sheetImportTeamsShape).superRefine((data, ctx) => {
   if (
+    !data.preview &&
     !data.sources &&
     !data.masterUrl &&
     !data.regionalUrls?.na &&
@@ -151,22 +213,29 @@ export const sheetImportTeams = z.object(sheetImportTeamsShape).superRefine((dat
   ) {
     ctx.addIssue({
       code: "custom",
-      message: "Provide staged sources from preview or at least one sheet URL",
+      message: "Provide staged preview, sources from preview, or at least one sheet URL",
       path: ["sources"],
     });
   }
 });
 
-/** Staged preview assembly — omit URL fields from the base shape (Zod forbids .omit on refined schemas). */
-export const sheetImportAssembleFull = z
-  .object(sheetImportFullShape)
-  .omit({ masterUrl: true, regionalUrls: true })
-  .extend({ sources: sheetImportSources });
+/** Staged preview assembly — omit URL/preview fields (Zod forbids .omit on refined schemas). */
+export const sheetImportAssembleFull = z.object({
+  mode: z.literal("full"),
+  seasonNumber: z.number().int().positive(),
+  startDate: isoDate,
+  endDate: isoDate.nullable().optional(),
+  theme: z.string().min(1).nullable().optional(),
+  ...sheetImportFilters,
+  sources: sheetImportSources,
+});
 
-export const sheetImportAssembleTeams = z
-  .object(sheetImportTeamsShape)
-  .omit({ masterUrl: true, regionalUrls: true })
-  .extend({ sources: sheetImportSources });
+export const sheetImportAssembleTeams = z.object({
+  mode: z.enum(["teams", "teams_and_players", "players"]),
+  seasonId: id,
+  ...sheetImportFilters,
+  sources: sheetImportSources,
+});
 
 export const teamCreate = z.object({
   name: z.string().min(1),

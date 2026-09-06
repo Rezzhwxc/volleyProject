@@ -145,7 +145,7 @@ export async function createWithPlayerNames(
   input: Omit<AwardInput, "playerIds"> & { playerNames: string[] },
 ) {
   const names = input.playerNames.map((name) => name.toLowerCase());
-  const matched = [];
+  const matched: (typeof players.$inferSelect)[] = [];
   for (const chunk of chunkValues(names)) {
     const part = await db.select().from(players).where(inArray(players.name, chunk));
     matched.push(...part);

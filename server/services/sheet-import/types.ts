@@ -63,7 +63,7 @@ export interface PreviewTeam {
   name: string;
   region: SheetRegion | null;
   playerNames: string[];
-  leadership?: Partial<Record<TeamLeadershipRole, string>>;
+  leadership?: Partial<Record<TeamLeadershipRole, string>> | undefined;
   included: boolean;
 }
 
@@ -157,4 +157,6 @@ export interface SheetImportInput {
   theme?: string | null | undefined;
   excludeTeamKeys?: string[] | undefined;
   excludeGameKeys?: string[] | undefined;
+  /** When set, commit skips re-assembling from sources (saves Worker CPU). */
+  preview?: SheetImportPreview | undefined;
 }

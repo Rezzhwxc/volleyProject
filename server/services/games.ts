@@ -373,7 +373,7 @@ function assertTeamRequirement(status: GameStatus, count: number) {
 
 async function assertTeamsInSeason(db: Db, seasonId: number, ids: number[]) {
   if (ids.length === 0) return [];
-  const linked = [];
+  const linked: (typeof teams.$inferSelect)[] = [];
   for (const chunk of chunkIds(ids)) {
     const part = await db
       .select()
@@ -546,7 +546,7 @@ export async function createByNames(
   db: Db,
   input: Omit<GameInput, "teamIds" | "team1Id" | "team2Id"> & { teamNames: string[] },
 ) {
-  const linked = [];
+  const linked: (typeof teams.$inferSelect)[] = [];
   for (const chunk of chunkValues(input.teamNames)) {
     const part = await db.select().from(teams).where(inArray(teams.name, chunk));
     linked.push(...part);

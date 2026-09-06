@@ -1,5 +1,6 @@
+import { env } from "cloudflare:workers";
 import { TRPCError } from "@trpc/server";
-import { teams, sheetImport, type AssembledSources } from "@server/services";
+import { teams, sheetImport, type AssembledSources, type SheetImportPreview } from "@server/services";
 import { adminProcedure, protectedProcedure, publicProcedure, router } from "../init";
 import { revalidate } from "../revalidate";
 import {
@@ -78,15 +79,20 @@ export const teamsRouter = router({
   }),
 
   commitSheetImport: adminProcedure.input(sheetImportTeams).mutation(async ({ ctx, input }) => {
-    const result = await sheetImport.commitSheetImport(ctx.db, {
-      mode: input.mode,
-      seasonId: input.seasonId,
-      masterUrl: input.masterUrl,
-      regionalUrls: input.regionalUrls,
-      sources: input.sources as AssembledSources | undefined,
-      excludeTeamKeys: input.excludeTeamKeys,
-      excludeGameKeys: input.excludeGameKeys,
-    });
+    const result = await sheetImport.commitSheetImport(
+      ctx.db,
+      {
+        mode: input.mode,
+        seasonId: input.seasonId,
+        masterUrl: input.masterUrl,
+        regionalUrls: input.regionalUrls,
+        sources: input.sources as AssembledSources | undefined,
+        preview: input.preview as SheetImportPreview | undefined,
+        excludeTeamKeys: input.excludeTeamKeys,
+        excludeGameKeys: input.excludeGameKeys,
+      },
+      { d1: env.DB },
+    );
     revalidate("/teams", "/portal/teams", "/players", "/portal/players");
     return result;
   }),

@@ -429,11 +429,28 @@ export function SeasonSheetImport() {
       startDate,
       endDate: endDate || null,
       theme: theme || null,
-      ...(stagedSources ? { sources: stagedSources } : { masterUrl, regionalUrls: regionalPayload(naUrl, euUrl, asUrl) }),
+      ...(preview
+        ? { preview }
+        : stagedSources
+          ? { sources: stagedSources }
+          : { masterUrl, regionalUrls: regionalPayload(naUrl, euUrl, asUrl) }),
       excludeTeamKeys: [...excludedTeams],
       excludeGameKeys: [...excludedGames],
     }),
-    [seasonNumber, startDate, endDate, theme, masterUrl, naUrl, euUrl, asUrl, excludedTeams, excludedGames, stagedSources],
+    [
+      seasonNumber,
+      startDate,
+      endDate,
+      theme,
+      masterUrl,
+      naUrl,
+      euUrl,
+      asUrl,
+      excludedTeams,
+      excludedGames,
+      stagedSources,
+      preview,
+    ],
   );
 
   return (
@@ -651,12 +668,14 @@ export function TeamsSheetImport({
   const baseInput = {
     mode,
     seasonId: Number.parseInt(seasonId, 10),
-    ...(stagedSources
-      ? { sources: stagedSources }
-      : {
-          ...(masterUrl ? { masterUrl } : {}),
-          regionalUrls: regionalPayload(naUrl, euUrl, asUrl),
-        }),
+    ...(preview
+      ? { preview }
+      : stagedSources
+        ? { sources: stagedSources }
+        : {
+            ...(masterUrl ? { masterUrl } : {}),
+            regionalUrls: regionalPayload(naUrl, euUrl, asUrl),
+          }),
     excludeTeamKeys: [...excludedTeams],
   };
 
