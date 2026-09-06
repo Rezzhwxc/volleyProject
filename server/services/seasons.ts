@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, inArray, isNotNull, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, isNotNull, or, sql } from "drizzle-orm";
 import type { Db } from "@db";
 import { correlatedCount } from "@db/sqlx";
 import { awards, games, records, seasons, teams, teamsGames } from "@db/schema";
@@ -43,14 +43,7 @@ export async function getById(db: Db, id: number, region?: GameRegion) {
 
   const regionClause = region ? eq(games.region, region) : undefined;
 
-  const [linkedTeamIds, seasonGames, seasonAwards, seasonSchedule] = await Promise.all([
-    region
-      ? db
-          .select({ teamId: teamsGames.teamId })
-          .from(teamsGames)
-          .innerJoin(games, eq(teamsGames.gameId, games.id))
-          .where(and(eq(games.seasonId, id), eq(games.region, region)))
-      : Promise.resolve(null),
+  const [seasonGames, seasonAwards, seasonSchedule, seasonTeams] = await Promise.all([
     db
       .select()
       .from(games)
@@ -68,21 +61,23 @@ export async function getById(db: Db, id: number, region?: GameRegion) {
         ),
       )
       .orderBy(asc(games.date)),
+    region
+      ? db
+          .select()
+          .from(teams)
+          .where(
+            and(
+              eq(teams.seasonId, id),
+              sql`${teams.id} in (
+                select distinct ${teamsGames.teamId} from ${teamsGames}
+                inner join ${games} on ${teamsGames.gameId} = ${games.id}
+                where ${games.seasonId} = ${id} and ${games.region} = ${region}
+              )`,
+            ),
+          )
+          .orderBy(asc(teams.name))
+      : db.select().from(teams).where(eq(teams.seasonId, id)).orderBy(asc(teams.name)),
   ]);
-
-  const teamIds = linkedTeamIds
-    ? [...new Set(linkedTeamIds.map((row) => row.teamId))]
-    : null;
-  const seasonTeams =
-    teamIds === null
-      ? await db.select().from(teams).where(eq(teams.seasonId, id)).orderBy(asc(teams.name))
-      : teamIds.length === 0
-        ? []
-        : await db
-            .select()
-            .from(teams)
-            .where(and(eq(teams.seasonId, id), inArray(teams.id, teamIds)))
-            .orderBy(asc(teams.name));
 
   return { ...season, teams: seasonTeams, games: seasonGames, awards: seasonAwards, schedule: seasonSchedule };
 }
