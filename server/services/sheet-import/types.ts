@@ -63,7 +63,7 @@ export interface PreviewTeam {
   name: string;
   region: SheetRegion | null;
   playerNames: string[];
-  leadership?: Partial<Record<TeamLeadershipRole, string>>;
+  leadership?: Partial<Record<TeamLeadershipRole, string>> | undefined;
   included: boolean;
 }
 

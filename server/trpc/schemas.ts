@@ -162,9 +162,13 @@ export const sheetImportPreviewSnapshot = z.object({
   errors: z.array(z.string()),
 });
 
-const sheetImportExcludes = {
+const sheetImportFilters = {
   excludeTeamKeys: z.array(z.string()).optional(),
   excludeGameKeys: z.array(z.string()).optional(),
+};
+
+const sheetImportCommitExtras = {
+  ...sheetImportFilters,
   sources: sheetImportSources.optional(),
   preview: sheetImportPreviewSnapshot.optional(),
 };
@@ -177,7 +181,7 @@ const sheetImportFullShape = {
   theme: z.string().min(1).nullable().optional(),
   masterUrl: sheetUrl.optional(),
   regionalUrls,
-  ...sheetImportExcludes,
+  ...sheetImportCommitExtras,
 } as const;
 
 const sheetImportTeamsShape = {
@@ -185,7 +189,7 @@ const sheetImportTeamsShape = {
   seasonId: id,
   masterUrl: sheetUrl.optional(),
   regionalUrls,
-  ...sheetImportExcludes,
+  ...sheetImportCommitExtras,
 } as const;
 
 export const sheetImportFull = z.object(sheetImportFullShape).superRefine((data, ctx) => {
@@ -215,16 +219,23 @@ export const sheetImportTeams = z.object(sheetImportTeamsShape).superRefine((dat
   }
 });
 
-/** Staged preview assembly — omit URL fields from the base shape (Zod forbids .omit on refined schemas). */
-export const sheetImportAssembleFull = z
-  .object(sheetImportFullShape)
-  .omit({ masterUrl: true, regionalUrls: true })
-  .extend({ sources: sheetImportSources });
+/** Staged preview assembly — omit URL/preview fields (Zod forbids .omit on refined schemas). */
+export const sheetImportAssembleFull = z.object({
+  mode: z.literal("full"),
+  seasonNumber: z.number().int().positive(),
+  startDate: isoDate,
+  endDate: isoDate.nullable().optional(),
+  theme: z.string().min(1).nullable().optional(),
+  ...sheetImportFilters,
+  sources: sheetImportSources,
+});
 
-export const sheetImportAssembleTeams = z
-  .object(sheetImportTeamsShape)
-  .omit({ masterUrl: true, regionalUrls: true })
-  .extend({ sources: sheetImportSources });
+export const sheetImportAssembleTeams = z.object({
+  mode: z.enum(["teams", "teams_and_players", "players"]),
+  seasonId: id,
+  ...sheetImportFilters,
+  sources: sheetImportSources,
+});
 
 export const teamCreate = z.object({
   name: z.string().min(1),

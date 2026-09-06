@@ -1,6 +1,6 @@
 import { env } from "cloudflare:workers";
 import { TRPCError } from "@trpc/server";
-import { teams, sheetImport, type AssembledSources } from "@server/services";
+import { teams, sheetImport, type AssembledSources, type SheetImportPreview } from "@server/services";
 import { adminProcedure, protectedProcedure, publicProcedure, router } from "../init";
 import { revalidate } from "../revalidate";
 import {
@@ -87,7 +87,7 @@ export const teamsRouter = router({
         masterUrl: input.masterUrl,
         regionalUrls: input.regionalUrls,
         sources: input.sources as AssembledSources | undefined,
-        preview: input.preview,
+        preview: input.preview as SheetImportPreview | undefined,
         excludeTeamKeys: input.excludeTeamKeys,
         excludeGameKeys: input.excludeGameKeys,
       },
