@@ -1,13 +1,24 @@
 import { env } from "cloudflare:workers";
-import { seasons, sheetImport } from "@server/services";
-import { adminProcedure, publicProcedure, router } from "../init";
+import { seasons, sheetImport, type AssembledSources, type SheetImportPreview } from "@server/services";
+import { adminProcedure, publicProcedure, router, scopedRegion } from "../init";
 import { revalidate } from "../revalidate";
-import { byId, seasonCreate, seasonUpdate, sheetImportFull } from "../schemas";
+import {
+  byId,
+  optionalRegion,
+  regionValue,
+  seasonCreate,
+  seasonUpdate,
+  sheetImportFull,
+} from "../schemas";
 
 export const seasonsRouter = router({
-  list: publicProcedure.query(({ ctx }) => seasons.list(ctx.db)),
+  list: publicProcedure
+    .input(optionalRegion)
+    .query(({ ctx, input }) => seasons.list(ctx.db, scopedRegion(ctx, input?.region))),
 
-  byId: publicProcedure.input(byId).query(({ ctx, input }) => seasons.getById(ctx.db, input.id)),
+  byId: publicProcedure
+    .input(byId.extend({ region: regionValue }))
+    .query(({ ctx, input }) => seasons.getById(ctx.db, input.id, scopedRegion(ctx, input.region))),
 
   count: adminProcedure.query(({ ctx }) => seasons.count(ctx.db)),
 
@@ -54,12 +65,16 @@ export const seasonsRouter = router({
         theme: input.theme,
         masterUrl: input.masterUrl,
         regionalUrls: input.regionalUrls,
+        sessionId: input.sessionId,
+        sources: input.sources as AssembledSources | undefined,
+        preview: input.preview as SheetImportPreview | undefined,
         excludeTeamKeys: input.excludeTeamKeys,
         excludeGameKeys: input.excludeGameKeys,
       },
       {
         queue: env.RECORDS_QUEUE,
         requestedBy: ctx.user.id,
+        d1: env.DB,
       },
     );
     revalidate(

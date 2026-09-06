@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { api } from "@server/trpc/server";
+import { getSiteRegionQuery } from "@server/site-region";
 import { EmptyState } from "@components/site/empty-state";
 import { PageHeader } from "@components/site/page-header";
 import { SchedulesBoard } from "@components/site/schedules-board";
@@ -8,7 +9,7 @@ export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = {
   title: "Schedules",
-  description: "Upcoming and completed matches across every region and phase.",
+  description: "Upcoming and completed matches for the selected region.",
 };
 
 export default async function SchedulesPage({
@@ -17,13 +18,13 @@ export default async function SchedulesPage({
   searchParams: Promise<{ season?: string }>;
 }) {
   const { season } = await searchParams;
-  const trpc = await api();
+  const [trpc, { query }] = await Promise.all([api(), getSiteRegionQuery()]);
   const parsed = season ? Number.parseInt(season, 10) : Number.NaN;
   const seasonId = Number.isInteger(parsed) && parsed > 0 ? parsed : undefined;
 
   const [rows, allSeasons] = await Promise.all([
-    trpc.games.listSchedule({ seasonId }),
-    trpc.seasons.list(),
+    trpc.games.listSchedule({ seasonId, ...query }),
+    trpc.seasons.list(query),
   ]);
 
   return (
@@ -31,7 +32,7 @@ export default async function SchedulesPage({
       <PageHeader
         eyebrow="Fixtures"
         title="Schedules"
-        description="Every match across regions and phases, grouped by the day it was played."
+        description="Matches in the selected region, grouped by the day they were played."
       />
 
       {rows.length === 0 ? (

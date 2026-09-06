@@ -32,6 +32,19 @@ describe("seasons", () => {
     expect(rows.find((row) => row.seasonNumber === 1)?.gameCount).toBe(2);
   });
 
+  it("counts and hydrates one region at a time", async () => {
+    const listed = await seasons.list(db, "eu");
+    expect(listed.find((row) => row.seasonNumber === 2)?.gameCount).toBe(1);
+    expect(listed.find((row) => row.seasonNumber === 1)?.gameCount).toBe(0);
+
+    const season = await seasons.getById(db, FIXTURES.otherSeasonId, "eu");
+    expect(season?.games).toHaveLength(1);
+    expect(season?.teams.map((team) => team.name).sort()).toEqual([
+      "Desert Servers",
+      "Forest Diggers",
+    ]);
+  });
+
   it("hydrates one season with its teams, games, awards and schedule", async () => {
     const season = await seasons.getById(db, FIXTURES.seasonId);
     expect(season?.teams).toHaveLength(2);
@@ -46,6 +59,17 @@ describe("seasons", () => {
 });
 
 describe("teams", () => {
+  it("lists only teams that played in a region", async () => {
+    const eu = await teams.list(db, "eu");
+    expect(eu.map((row) => row.name).sort()).toEqual(["Desert Servers", "Forest Diggers"]);
+  });
+
+  it("hides games from other regions on a team profile", async () => {
+    const team = await teams.getByName(db, FIXTURES.teamName, "eu");
+    expect(team?.id).toBe(FIXTURES.teamId);
+    expect(team?.games).toEqual([]);
+  });
+
   it("keys a team by name", async () => {
     const team = await teams.getByName(db, FIXTURES.teamName);
     expect(team?.id).toBe(FIXTURES.teamId);
@@ -71,6 +95,14 @@ describe("teams", () => {
 });
 
 describe("players", () => {
+  it("lists players who appear in a region", async () => {
+    const na = await players.list(db, "na");
+    const eu = await players.list(db, "eu");
+    expect(na.length).toBeGreaterThan(0);
+    expect(eu.length).toBeGreaterThan(0);
+    expect(eu.every((row) => na.some((player) => player.id === row.id))).toBe(true);
+  });
+
   it("hydrates a player with teams, stats, awards and records", async () => {
     const player = await players.getById(db, FIXTURES.playerId);
     expect(player?.teams).toHaveLength(1);
@@ -79,6 +111,14 @@ describe("players", () => {
     expect(player?.awards).toHaveLength(1);
     expect(player?.awards[0]?.seasonNumber).toBe(1);
     expect(player?.records).toHaveLength(1);
+  });
+
+  it("hides teams, stats and records from other regions", async () => {
+    const player = await players.getById(db, FIXTURES.playerId, "eu");
+    expect(player?.id).toBe(FIXTURES.playerId);
+    expect(player?.teams).toEqual([]);
+    expect(player?.stats).toEqual([]);
+    expect(player?.records).toEqual([]);
   });
 
   it("links a sign-in to an existing player with the same Roblox name", async () => {
@@ -145,6 +185,18 @@ describe("games", () => {
     expect(rows.every((row) => row.teams.length === 2)).toBe(true);
   });
 
+  it("scopes lists to one match region", async () => {
+    const na = await games.list(db, "na");
+    const eu = await games.list(db, "eu");
+    expect(na.every((row) => row.region === "na")).toBe(true);
+    expect(eu.map((row) => row.id)).toEqual([5]);
+    expect(await games.listPlayed(db, "eu")).toEqual([]);
+    expect(await games.listSchedule(db, FIXTURES.otherSeasonId, "eu")).toHaveLength(1);
+    expect(await games.listSchedule(db, FIXTURES.otherSeasonId, "na")).toEqual([]);
+    expect(await games.getById(db, FIXTURES.gameId, "eu")).toBeNull();
+    expect((await games.getById(db, 5, "eu"))?.region).toBe("eu");
+  });
+
   it("creates a game from team names and links them", async () => {
     const created = await games.createByNames(db, {
       date: "2026-02-02",
@@ -199,6 +251,12 @@ describe("stats", () => {
     expect(rows.every((row) => row.gamesPlayed === 2)).toBe(true);
   });
 
+  it("scopes the leaderboard to one region", async () => {
+    expect(await stats.leaderboard(db, { region: "eu" })).toEqual([]);
+    const na = await stats.leaderboard(db, { region: "na" });
+    expect(na).toHaveLength(4);
+  });
+
   it("returns per-game stat lines with season scores for the vector graph", async () => {
     const players = await stats.vectorGraph(db);
     expect(players.length).toBeGreaterThan(0);
@@ -251,6 +309,11 @@ describe("awards", () => {
 });
 
 describe("records", () => {
+  it("hides game records from other regions", async () => {
+    expect(await records.list(db, "eu")).toEqual([]);
+    expect((await records.list(db, "na")).every((row) => row.gameId !== null)).toBe(true);
+  });
+
   it("filters by metric and minimum attempts", async () => {
     expect(await records.listByMetric(db, "spike kills")).toHaveLength(2);
     expect(await records.listByMetric(db, "spiking percentage", 10)).toHaveLength(1);

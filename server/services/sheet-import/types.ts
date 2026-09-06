@@ -28,7 +28,7 @@ export interface ParsedTeam {
   region: SheetRegion | null;
   playerNames: string[];
   /** Header-adjacent captains: first = C, second = VC, third = CC. */
-  leadership?: Partial<Record<TeamLeadershipRole, string>>;
+  leadership?: Partial<Record<TeamLeadershipRole, string>> | undefined;
 }
 
 export interface ParsedGame {
@@ -63,7 +63,7 @@ export interface PreviewTeam {
   name: string;
   region: SheetRegion | null;
   playerNames: string[];
-  leadership?: Partial<Record<TeamLeadershipRole, string>>;
+  leadership?: Partial<Record<TeamLeadershipRole, string>> | undefined;
   included: boolean;
 }
 
@@ -137,10 +137,20 @@ export interface RegionalUrls {
   as?: string | undefined;
 }
 
+export interface AssembledSources {
+  masterTeams: ParsedTeam[];
+  masterGames: ParsedGame[];
+  regionalTeams: ParsedTeam[];
+  regionalBlocks: ParsedScoreBlock[];
+  sourceWarnings: string[];
+}
+
 export interface SheetImportInput {
   mode: SheetImportMode;
   masterUrl?: string | undefined;
   regionalUrls?: RegionalUrls | undefined;
+  sources?: AssembledSources | undefined;
+  sessionId?: string | undefined;
   seasonNumber?: number | undefined;
   seasonId?: number | undefined;
   startDate?: string | undefined;
@@ -148,4 +158,6 @@ export interface SheetImportInput {
   theme?: string | null | undefined;
   excludeTeamKeys?: string[] | undefined;
   excludeGameKeys?: string[] | undefined;
+  /** When set, commit skips re-assembling from sources (saves Worker CPU). */
+  preview?: SheetImportPreview | undefined;
 }

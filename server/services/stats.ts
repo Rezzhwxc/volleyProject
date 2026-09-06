@@ -4,6 +4,7 @@ import { insertMany } from "@db/insert";
 import { games, players, seasons, stats, teams, teamsPlayers } from "@db/schema";
 import type { VectorGraphPlayer } from "@/lib/analytics/stats-vectorization";
 import { STAGE_ROUNDS, type StageRound } from "@/lib/stats/stage-rounds";
+import type { GameRegion } from "./games";
 import { ConflictError, found, NotFoundError } from "./errors";
 import type { PartialInput } from "./input";
 
@@ -96,7 +97,7 @@ export async function count(db: Db) {
   return db.$count(stats);
 }
 
-export async function vectorGraph(db: Db): Promise<VectorGraphPlayer[]> {
+export async function vectorGraph(db: Db, region?: GameRegion): Promise<VectorGraphPlayer[]> {
   const rows = await db
     .select({
       playerId: players.id,
@@ -122,6 +123,7 @@ export async function vectorGraph(db: Db): Promise<VectorGraphPlayer[]> {
     .innerJoin(players, eq(stats.playerId, players.id))
     .innerJoin(games, eq(stats.gameId, games.id))
     .innerJoin(seasons, eq(games.seasonId, seasons.id))
+    .where(region ? eq(games.region, region) : undefined)
     .orderBy(asc(players.name), desc(games.date));
 
   const byPlayer = new Map<number, VectorGraphPlayer>();
@@ -162,6 +164,7 @@ const totalErrors = sql<number>`sum(${stats.spikingErrors} + ${stats.settingErro
 export interface LeaderboardOptions {
   seasonId?: number | undefined;
   stageRound?: StageRound | undefined;
+  region?: GameRegion | undefined;
 }
 
 function buildStageRoundFilter(stageRound: StageRound | undefined) {
@@ -185,7 +188,7 @@ function buildStageRoundFilter(stageRound: StageRound | undefined) {
 }
 
 export async function leaderboard(db: Db, options: LeaderboardOptions = {}) {
-  const { seasonId, stageRound } = options;
+  const { seasonId, stageRound, region } = options;
   const stageFilter = buildStageRoundFilter(stageRound);
 
   const query = db
@@ -223,6 +226,7 @@ export async function leaderboard(db: Db, options: LeaderboardOptions = {}) {
   const filters = [
     seasonId === undefined ? undefined : eq(games.seasonId, seasonId),
     stageFilter,
+    region ? eq(games.region, region) : undefined,
   ].filter(Boolean);
 
   const baseQuery =

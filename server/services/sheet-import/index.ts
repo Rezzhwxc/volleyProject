@@ -4,8 +4,14 @@ export type {
   SheetImportPreview,
   SheetImportCommitResult,
   RegionalUrls,
+  AssembledSources,
 } from "./types";
-export { buildSheetImportPreview, assembleSheetImportPreview, yearFromDate } from "./preview";
+export {
+  buildSheetImportPreview,
+  assembleSheetImportPreview,
+  toClientPreview,
+  yearFromDate,
+} from "./preview";
 export { commitSheetImport } from "./commit";
 export { normalizeName, displayName, parseTeamHeader } from "./names";
 export { parseMasterTeamsTab, parseMasterScheduleTab, parseMasterWorkbook } from "./parse-master";
@@ -18,3 +24,9 @@ export {
   loadRegionalSourceBatch,
   inspectSheetTabs,
 } from "./sources";
+export {
+  createSheetImportSession,
+  mergeSheetImportSession,
+  requireSheetImportSession,
+  deleteSheetImportSession,
+} from "./session";

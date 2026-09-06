@@ -1,7 +1,7 @@
 import { and, asc, eq, inArray, sql } from "drizzle-orm";
 import type { Db } from "@db";
 import { correlatedCount } from "@db/sqlx";
-import { insertMany } from "@db/insert";
+import { insertMany, chunkValues } from "@db/insert";
 import {
   games,
   players,
@@ -13,6 +13,7 @@ import {
   type TeamLeadershipRole,
 } from "@db/schema";
 import { ConflictError, found } from "./errors";
+import type { GameRegion } from "./games";
 import type { PartialInput } from "./input";
 import { isAdmin } from "./users";
 
@@ -48,12 +49,23 @@ const withSeason = {
   gameCount: correlatedCount("teams_games", "team_id", "teams", "id"),
 };
 
-export async function list(db: Db) {
-  return db
+function teamInRegion(region: GameRegion) {
+  return sql`${teams.id} in (
+    select distinct ${teamsGames.teamId} from ${teamsGames}
+    inner join ${games} on ${teamsGames.gameId} = ${games.id}
+    where ${games.region} = ${region}
+  )`;
+}
+
+export async function list(db: Db, region?: GameRegion) {
+  const query = db
     .select(withSeason)
     .from(teams)
-    .leftJoin(seasons, eq(teams.seasonId, seasons.id))
-    .orderBy(asc(teams.name));
+    .leftJoin(seasons, eq(teams.seasonId, seasons.id));
+
+  if (!region) return query.orderBy(asc(teams.name));
+
+  return query.where(teamInRegion(region)).orderBy(asc(teams.name));
 }
 
 export async function listBySeason(db: Db, seasonId: number) {
@@ -65,22 +77,22 @@ export async function listBySeason(db: Db, seasonId: number) {
     .orderBy(asc(teams.name));
 }
 
-export async function getById(db: Db, id: number) {
+export async function getById(db: Db, id: number, region?: GameRegion) {
   const team = await db.query.teams.findFirst({ where: eq(teams.id, id) });
   if (!team) return null;
-  return hydrate(db, team);
+  return hydrate(db, team, region);
 }
 
-export async function getByName(db: Db, name: string) {
+export async function getByName(db: Db, name: string, region?: GameRegion) {
   const team = await db.query.teams.findFirst({ where: eq(teams.name, name) });
   if (!team) return null;
-  return hydrate(db, team);
+  return hydrate(db, team, region);
 }
 
-async function hydrate(db: Db, team: typeof teams.$inferSelect) {
+async function hydrate(db: Db, team: typeof teams.$inferSelect, region?: GameRegion) {
   const [roster, schedule, season] = await Promise.all([
     listPlayers(db, team.id),
-    listGames(db, team.id),
+    listGames(db, team.id, region),
     team.seasonId
       ? db.query.seasons.findFirst({ where: eq(seasons.id, team.seasonId) })
       : Promise.resolve(undefined),
@@ -111,7 +123,12 @@ export async function listPlayers(db: Db, teamId: number) {
   return sortRoster(rows);
 }
 
-export async function listPlayersBySeason(db: Db, seasonId: number) {
+export async function listPlayersBySeason(db: Db, seasonId: number, region?: GameRegion) {
+  const filters = [eq(teams.seasonId, seasonId)];
+  if (region) {
+    filters.push(teamInRegion(region));
+  }
+
   const rows = await db
     .select({
       teamId: teamsPlayers.teamId,
@@ -123,7 +140,7 @@ export async function listPlayersBySeason(db: Db, seasonId: number) {
     .from(teamsPlayers)
     .innerJoin(players, eq(teamsPlayers.playerId, players.id))
     .innerJoin(teams, eq(teamsPlayers.teamId, teams.id))
-    .where(eq(teams.seasonId, seasonId));
+    .where(and(...filters));
   return sortRoster(rows);
 }
 
@@ -133,7 +150,7 @@ export async function listPlayersByTeamName(db: Db, name: string) {
   return listPlayers(db, team.id);
 }
 
-export async function listGames(db: Db, teamId: number) {
+export async function listGames(db: Db, teamId: number, region?: GameRegion) {
   return db
     .select({
       id: games.id,
@@ -146,7 +163,7 @@ export async function listGames(db: Db, teamId: number) {
     })
     .from(teamsGames)
     .innerJoin(games, eq(teamsGames.gameId, games.id))
-    .where(eq(teamsGames.teamId, teamId))
+    .where(and(eq(teamsGames.teamId, teamId), region ? eq(games.region, region) : undefined))
     .orderBy(asc(games.date));
 }
 
@@ -172,7 +189,12 @@ export async function create(db: Db, input: TeamInput) {
 export async function createMany(db: Db, input: TeamInput[]) {
   await insertMany(db, teams, input);
   const names = input.map((team) => team.name);
-  return db.select().from(teams).where(inArray(teams.name, names));
+  const matched = [];
+  for (const chunk of chunkValues(names)) {
+    const part = await db.select().from(teams).where(inArray(teams.name, chunk));
+    matched.push(...part);
+  }
+  return matched;
 }
 
 export async function update(db: Db, id: number, input: PartialInput<TeamInput>) {

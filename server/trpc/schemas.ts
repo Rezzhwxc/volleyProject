@@ -46,26 +46,219 @@ const regionalUrls = z
   })
   .optional();
 
-export const sheetImportFull = z.object({
+const parsedTeam = z.object({
+  name: z.string(),
+  region: z.enum(["na", "eu", "as"]).nullable(),
+  playerNames: z.array(z.string()),
+  leadership: z
+    .object({
+      C: z.string().optional(),
+      VC: z.string().optional(),
+      CC: z.string().optional(),
+    })
+    .optional(),
+});
+
+const parsedGame = z.object({
+  key: z.string(),
+  region: z.enum(["na", "eu", "as"]),
+  phase: z.enum(["qualifiers", "playoffs"]),
+  round: z.string(),
+  date: z.string(),
+  team1Name: z.string(),
+  team2Name: z.string(),
+  team1Score: z.number().nullable(),
+  team2Score: z.number().nullable(),
+  setScores: z.array(z.string()),
+  forfeit: z.boolean(),
+});
+
+const sheetStatCounts = z.object({
+  spikeKills: z.number(),
+  spikeAttempts: z.number(),
+  spikingErrors: z.number(),
+  apeKills: z.number(),
+  apeAttempts: z.number(),
+  assists: z.number(),
+  settingErrors: z.number(),
+  blocks: z.number(),
+  blockFollows: z.number(),
+  digs: z.number(),
+  aces: z.number(),
+  servingErrors: z.number(),
+  miscErrors: z.number(),
+});
+
+const parsedBlock = z.object({
+  teamName: z.string(),
+  region: z.enum(["na", "eu", "as"]),
+  winnerName: z.string(),
+  teamScore: z.number(),
+  opponentScore: z.number(),
+  rows: z.array(sheetStatCounts.extend({ playerName: z.string() })),
+});
+
+export const sheetImportSources = z.object({
+  masterTeams: z.array(parsedTeam),
+  masterGames: z.array(parsedGame),
+  regionalTeams: z.array(parsedTeam),
+  regionalBlocks: z.array(parsedBlock),
+  sourceWarnings: z.array(z.string()),
+});
+
+const previewTeam = z.object({
+  key: z.string(),
+  name: z.string(),
+  region: z.enum(["na", "eu", "as"]).nullable(),
+  playerNames: z.array(z.string()),
+  leadership: z
+    .object({
+      C: z.string().optional(),
+      VC: z.string().optional(),
+      CC: z.string().optional(),
+    })
+    .optional(),
+  included: z.boolean(),
+});
+
+const previewGame = parsedGame.extend({
+  matchedStatCount: z.number(),
+  included: z.boolean(),
+});
+
+const previewStat = z.object({
+  gameKey: z.string(),
+  teamName: z.string(),
+  playerName: z.string(),
+  counts: sheetStatCounts,
+});
+
+/** Staged preview from assemblePreview — commit uses this instead of re-parsing sources. */
+export const sheetImportPreviewSnapshot = z.object({
+  mode: z.enum(["full", "teams", "teams_and_players", "players"]),
+  seasonNumber: z.number().nullable(),
+  seasonId: z.number().nullable(),
+  counts: z.object({
+    teams: z.number(),
+    players: z.number(),
+    playersNew: z.number(),
+    playersExisting: z.number(),
+    games: z.number(),
+    stats: z.number(),
+    warnings: z.number(),
+    errors: z.number(),
+  }),
+  teams: z.array(previewTeam),
+  players: z.array(
+    z.object({
+      name: z.string(),
+      teamName: z.string(),
+      exists: z.boolean(),
+    }),
+  ),
+  games: z.array(previewGame),
+  stats: z.array(previewStat),
+  warnings: z.array(z.string()),
+  errors: z.array(z.string()),
+});
+
+const sheetImportFilters = {
+  excludeTeamKeys: z.array(z.string()).optional(),
+  excludeGameKeys: z.array(z.string()).optional(),
+};
+
+const sheetImportSessionId = z.string().uuid();
+
+const sheetImportCommitExtras = {
+  ...sheetImportFilters,
+  sessionId: sheetImportSessionId.optional(),
+  sources: sheetImportSources.optional(),
+  preview: sheetImportPreviewSnapshot.optional(),
+};
+
+const sheetImportFullShape = {
   mode: z.literal("full"),
   seasonNumber: z.number().int().positive(),
   startDate: isoDate,
   endDate: isoDate.nullable().optional(),
   theme: z.string().min(1).nullable().optional(),
-  masterUrl: sheetUrl,
+  masterUrl: sheetUrl.optional(),
   regionalUrls,
-  excludeTeamKeys: z.array(z.string()).optional(),
-  excludeGameKeys: z.array(z.string()).optional(),
-});
+  ...sheetImportCommitExtras,
+} as const;
 
-export const sheetImportTeams = z.object({
+const sheetImportTeamsShape = {
   mode: z.enum(["teams", "teams_and_players", "players"]),
   seasonId: id,
   masterUrl: sheetUrl.optional(),
   regionalUrls,
-  excludeTeamKeys: z.array(z.string()).optional(),
-  excludeGameKeys: z.array(z.string()).optional(),
+  ...sheetImportCommitExtras,
+} as const;
+
+export const sheetImportFull = z.object(sheetImportFullShape).superRefine((data, ctx) => {
+  if (!data.sessionId && !data.preview && !data.sources && !data.masterUrl) {
+    ctx.addIssue({
+      code: "custom",
+      message: "Provide a session id, staged preview, sources from preview, or a master sheet URL",
+      path: ["masterUrl"],
+    });
+  }
 });
+
+export const sheetImportTeams = z.object(sheetImportTeamsShape).superRefine((data, ctx) => {
+  if (
+    !data.sessionId &&
+    !data.preview &&
+    !data.sources &&
+    !data.masterUrl &&
+    !data.regionalUrls?.na &&
+    !data.regionalUrls?.eu &&
+    !data.regionalUrls?.as
+  ) {
+    ctx.addIssue({
+      code: "custom",
+      message: "Provide a session id, staged preview, sources from preview, or at least one sheet URL",
+      path: ["sources"],
+    });
+  }
+});
+
+function requireSessionOrSources(
+  data: { sessionId?: string | undefined; sources?: unknown },
+  ctx: z.RefinementCtx,
+) {
+  if (!data.sessionId && !data.sources) {
+    ctx.addIssue({
+      code: "custom",
+      message: "Provide a session id or staged sources",
+      path: ["sessionId"],
+    });
+  }
+}
+
+/** Staged preview assembly — omit URL/preview fields (Zod forbids .omit on refined schemas). */
+export const sheetImportAssembleFull = z
+  .object({
+    mode: z.literal("full"),
+    seasonNumber: z.number().int().positive(),
+    startDate: isoDate,
+    endDate: isoDate.nullable().optional(),
+    theme: z.string().min(1).nullable().optional(),
+    ...sheetImportFilters,
+    sessionId: sheetImportSessionId.optional(),
+    sources: sheetImportSources.optional(),
+  })
+  .superRefine(requireSessionOrSources);
+
+export const sheetImportAssembleTeams = z
+  .object({
+    mode: z.enum(["teams", "teams_and_players", "players"]),
+    seasonId: id,
+    ...sheetImportFilters,
+    sessionId: sheetImportSessionId.optional(),
+    sources: sheetImportSources.optional(),
+  })
+  .superRefine(requireSessionOrSources);
 
 export const teamCreate = z.object({
   name: z.string().min(1),
@@ -256,18 +449,34 @@ export const triviaSubject = z.object({
   seed: z.number().min(0).max(1),
 });
 
-export const bySeason = z.object({ seasonId: id });
+export const regionValue = z.enum(MATCH_REGIONS).optional();
+
+export const optionalRegion = z
+  .object({
+    region: regionValue,
+  })
+  .optional();
+
+export const bySeason = z.object({
+  seasonId: id,
+  region: regionValue,
+});
 export const byTeamName = z.object({ name: z.string().min(1) });
-export const optionalSeason = z.object({ seasonId: id.optional() });
+export const optionalSeason = z.object({
+  seasonId: id.optional(),
+  region: regionValue,
+});
 
 export const STAGE_ROUNDS = ["R1", "R2", "R3", "R4", "R5", "R6", "all"] as const;
 
 export const leaderboardInput = z.object({
   seasonId: id.optional(),
   stageRound: z.enum(STAGE_ROUNDS).optional(),
+  region: regionValue,
 });
 export const recordsByMetric = z.object({
   metric: z.enum(RECORD_METRICS),
   minAttempts: z.number().int().positive().nullable().optional(),
   type: z.enum(RECORD_TYPES).nullable().optional(),
+  region: regionValue,
 });

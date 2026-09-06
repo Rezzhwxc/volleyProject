@@ -1,7 +1,7 @@
 import { and, asc, eq, inArray, sql } from "drizzle-orm";
 import type { Db } from "@db";
 import { correlatedCount } from "@db/sqlx";
-import { insertMany } from "@db/insert";
+import { insertMany, chunkValues } from "@db/insert";
 import {
   account,
   awards,
@@ -12,10 +12,12 @@ import {
   seasons,
   stats,
   teams,
+  teamsGames,
   teamsPlayers,
   user,
 } from "@db/schema";
 import { ConflictError, found, inserted, NotFoundError } from "./errors";
+import type { GameRegion } from "./games";
 import type { PartialInput } from "./input";
 
 export interface PlayerInput {
@@ -26,8 +28,29 @@ export interface PlayerInput {
 const teamCount = correlatedCount("teams_players", "player_id", "players", "id");
 const gamesPlayed = correlatedCount("stats", "player_id", "players", "id");
 
-export async function list(db: Db) {
-  return db
+function playerInRegion(region: GameRegion) {
+  return sql`${players.id} in (
+    select ${stats.playerId} from ${stats}
+    inner join ${games} on ${stats.gameId} = ${games.id}
+    where ${games.region} = ${region}
+    union
+    select ${teamsPlayers.playerId} from ${teamsPlayers}
+    inner join ${teamsGames} on ${teamsPlayers.teamId} = ${teamsGames.teamId}
+    inner join ${games} on ${teamsGames.gameId} = ${games.id}
+    where ${games.region} = ${region}
+  )`;
+}
+
+function teamInRegion(region: GameRegion) {
+  return sql`${teams.id} in (
+    select distinct ${teamsGames.teamId} from ${teamsGames}
+    inner join ${games} on ${teamsGames.gameId} = ${games.id}
+    where ${games.region} = ${region}
+  )`;
+}
+
+export async function list(db: Db, region?: GameRegion) {
+  const query = db
     .select({
       id: players.id,
       name: players.name,
@@ -35,8 +58,11 @@ export async function list(db: Db) {
       teamCount,
       gamesPlayed,
     })
-    .from(players)
-    .orderBy(asc(players.name));
+    .from(players);
+
+  if (!region) return query.orderBy(asc(players.name));
+
+  return query.where(playerInRegion(region)).orderBy(asc(players.name));
 }
 
 export async function listByTeam(db: Db, teamId: number) {
@@ -48,12 +74,12 @@ export async function listByTeam(db: Db, teamId: number) {
     .orderBy(asc(players.name));
 }
 
-export async function getById(db: Db, id: number) {
+export async function getById(db: Db, id: number, region?: GameRegion) {
   const player = await db.query.players.findFirst({ where: eq(players.id, id) });
   if (!player) return null;
 
   const [playerTeams, playerStats, playerAwards, playerRecords] = await Promise.all([
-    listTeams(db, id),
+    listTeams(db, id, region),
     db
       .select({
         id: stats.id,
@@ -79,7 +105,7 @@ export async function getById(db: Db, id: number) {
       .from(stats)
       .innerJoin(games, eq(stats.gameId, games.id))
       .leftJoin(seasons, eq(games.seasonId, seasons.id))
-      .where(eq(stats.playerId, id))
+      .where(and(eq(stats.playerId, id), region ? eq(games.region, region) : undefined))
       .orderBy(asc(games.date)),
     db
       .select({
@@ -94,7 +120,24 @@ export async function getById(db: Db, id: number) {
       .innerJoin(awards, eq(awardsPlayers.awardId, awards.id))
       .leftJoin(seasons, eq(awards.seasonId, seasons.id))
       .where(eq(awardsPlayers.playerId, id)),
-    db.select().from(records).where(eq(records.playerId, id)),
+    db
+      .select({
+        id: records.id,
+        metric: records.metric,
+        minAttempts: records.minAttempts,
+        type: records.type,
+        rank: records.rank,
+        value: records.value,
+        date: records.date,
+        seasonId: records.seasonId,
+        playerId: records.playerId,
+        gameId: records.gameId,
+        createdAt: records.createdAt,
+        updatedAt: records.updatedAt,
+      })
+      .from(records)
+      .leftJoin(games, eq(records.gameId, games.id))
+      .where(and(eq(records.playerId, id), region ? eq(games.region, region) : undefined)),
   ]);
 
   return {
@@ -106,7 +149,7 @@ export async function getById(db: Db, id: number) {
   };
 }
 
-export async function listTeams(db: Db, playerId: number) {
+export async function listTeams(db: Db, playerId: number, region?: GameRegion) {
   return db
     .select({
       id: teams.id,
@@ -119,7 +162,7 @@ export async function listTeams(db: Db, playerId: number) {
     .from(teamsPlayers)
     .innerJoin(teams, eq(teamsPlayers.teamId, teams.id))
     .leftJoin(seasons, eq(teams.seasonId, seasons.id))
-    .where(eq(teamsPlayers.playerId, playerId))
+    .where(and(eq(teamsPlayers.playerId, playerId), region ? teamInRegion(region) : undefined))
     .orderBy(asc(teams.name));
 }
 
@@ -132,8 +175,8 @@ export async function listTeamNamesByPlayerName(db: Db, playerName: string) {
   return rows.map((team) => team.name);
 }
 
-export async function listAllMemberships(db: Db) {
-  return db
+export async function listAllMemberships(db: Db, region?: GameRegion) {
+  const query = db
     .select({
       playerId: teamsPlayers.playerId,
       teamName: teams.name,
@@ -141,12 +184,16 @@ export async function listAllMemberships(db: Db) {
     })
     .from(teamsPlayers)
     .innerJoin(teams, eq(teamsPlayers.teamId, teams.id))
-    .leftJoin(seasons, eq(teams.seasonId, seasons.id))
-    .orderBy(asc(teams.name));
+    .leftJoin(seasons, eq(teams.seasonId, seasons.id));
+
+  if (!region) return query.orderBy(asc(teams.name));
+
+  return query.where(teamInRegion(region)).orderBy(asc(teams.name));
 }
 
-export async function count(db: Db) {
-  return db.$count(players);
+export async function count(db: Db, region?: GameRegion) {
+  if (!region) return db.$count(players);
+  return db.$count(players, playerInRegion(region));
 }
 
 export async function create(db: Db, input: PlayerInput & { teamId?: number | null | undefined }) {
@@ -176,12 +223,12 @@ export async function createMany(db: Db, input: PlayerInput[]) {
     position: player.position ?? "N/A",
   }));
   await insertMany(db, players, rows);
-  return db.select().from(players).where(
-    inArray(
-      players.name,
-      rows.map((row) => row.name),
-    ),
-  );
+  const matched = [];
+  for (const chunk of chunkValues(rows.map((row) => row.name))) {
+    const part = await db.select().from(players).where(inArray(players.name, chunk));
+    matched.push(...part);
+  }
+  return matched;
 }
 
 export async function createManyByTeamName(

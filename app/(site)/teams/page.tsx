@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { api } from "@server/trpc/server";
+import { getSiteRegionQuery } from "@server/site-region";
 import { EmptyState } from "@components/site/empty-state";
 import { PageHeader } from "@components/site/page-header";
 import { TeamsList } from "@components/site/teams-list";
@@ -12,8 +13,8 @@ export const metadata: Metadata = {
 };
 
 export default async function TeamsPage() {
-  const trpc = await api();
-  const rows = await trpc.teams.list();
+  const [trpc, { query }] = await Promise.all([api(), getSiteRegionQuery()]);
+  const rows = await trpc.teams.list(query);
 
   return (
     <div className="font-display">

@@ -1,6 +1,6 @@
 import { and, asc, desc, eq, inArray, isNotNull, or, sql } from "drizzle-orm";
 import type { Db } from "@db";
-import { insertMany } from "@db/insert";
+import { insertMany, chunkIds, chunkValues } from "@db/insert";
 import {
   gameStaff,
   games,
@@ -119,9 +119,14 @@ const listColumns = {
   challongeRound: games.challongeRound,
 };
 
-function scheduleFilter(seasonId?: number) {
+function matchRegion(region?: GameRegion) {
+  return region ? eq(games.region, region) : undefined;
+}
+
+function scheduleFilter(seasonId?: number, region?: GameRegion) {
   const hasSchedule = or(isNotNull(games.matchNumber), eq(games.status, "scheduled"));
-  return seasonId === undefined ? hasSchedule : and(eq(games.seasonId, seasonId), hasSchedule);
+  const scoped = seasonId === undefined ? hasSchedule : and(eq(games.seasonId, seasonId), hasSchedule);
+  return and(scoped, matchRegion(region));
 }
 
 function toScheduleRow(
@@ -167,52 +172,53 @@ function toScheduleRow(
   };
 }
 
-export async function list(db: Db) {
+export async function list(db: Db, region?: GameRegion) {
   const rows = await db
     .select(listColumns)
     .from(games)
     .leftJoin(seasons, eq(games.seasonId, seasons.id))
+    .where(matchRegion(region))
     .orderBy(desc(games.date));
   return attachTeams(db, rows);
 }
 
-export async function listPlayed(db: Db) {
+export async function listPlayed(db: Db, region?: GameRegion) {
   const rows = await db
     .select(listColumns)
     .from(games)
     .leftJoin(seasons, eq(games.seasonId, seasons.id))
-    .where(eq(games.status, "completed"))
+    .where(and(eq(games.status, "completed"), matchRegion(region)))
     .orderBy(desc(games.date));
   return attachTeams(db, rows);
 }
 
-export async function listSchedule(db: Db, seasonId?: number) {
+export async function listSchedule(db: Db, seasonId?: number, region?: GameRegion) {
   const rows = await db
     .select(listColumns)
     .from(games)
     .leftJoin(seasons, eq(games.seasonId, seasons.id))
-    .where(scheduleFilter(seasonId))
+    .where(scheduleFilter(seasonId, region))
     .orderBy(asc(games.date));
   const withTeams = await attachTeams(db, rows);
   return withTeams.map(toScheduleRow);
 }
 
-export async function listBySeason(db: Db, seasonId: number) {
+export async function listBySeason(db: Db, seasonId: number, region?: GameRegion) {
   const rows = await db
     .select(listColumns)
     .from(games)
     .leftJoin(seasons, eq(games.seasonId, seasons.id))
-    .where(eq(games.seasonId, seasonId))
+    .where(and(eq(games.seasonId, seasonId), matchRegion(region)))
     .orderBy(asc(games.date));
   return attachTeams(db, rows);
 }
 
-export async function listByRound(db: Db, seasonId: number, round: string) {
+export async function listByRound(db: Db, seasonId: number, round: string, region?: GameRegion) {
   const rows = await db
     .select(listColumns)
     .from(games)
     .leftJoin(seasons, eq(games.seasonId, seasons.id))
-    .where(and(eq(games.seasonId, seasonId), eq(games.round, round)))
+    .where(and(eq(games.seasonId, seasonId), eq(games.round, round), matchRegion(region)))
     .orderBy(asc(games.date));
   return attachTeams(db, rows).then((items) => items.map(toScheduleRow));
 }
@@ -225,23 +231,23 @@ async function attachTeams<T extends { id: number }>(db: Db, rows: T[]) {
     );
   }
 
-  const links = await db
-    .select({
-      gameId: teamsGames.gameId,
-      slot: teamsGames.slot,
-      id: teams.id,
-      name: teams.name,
-      logoUrl: teams.logoUrl,
-    })
-    .from(teamsGames)
-    .innerJoin(teams, eq(teamsGames.teamId, teams.id))
-    .where(
-      inArray(
-        teamsGames.gameId,
-        rows.map((row) => row.id),
-      ),
-    )
-    .orderBy(asc(teamsGames.slot));
+  const gameIds = rows.map((row) => row.id);
+  const links = [];
+  for (const chunk of chunkIds(gameIds)) {
+    const part = await db
+      .select({
+        gameId: teamsGames.gameId,
+        slot: teamsGames.slot,
+        id: teams.id,
+        name: teams.name,
+        logoUrl: teams.logoUrl,
+      })
+      .from(teamsGames)
+      .innerJoin(teams, eq(teamsGames.teamId, teams.id))
+      .where(inArray(teamsGames.gameId, chunk))
+      .orderBy(asc(teamsGames.slot));
+    links.push(...part);
+  }
 
   const byGame = new Map<number, TeamRef[]>();
   for (const link of links) {
@@ -261,22 +267,22 @@ function emptyStaff(): GameStaffSlots {
 async function attachStaff<T extends { id: number }>(db: Db, rows: T[]) {
   if (rows.length === 0) return rows.map((row) => ({ ...row, staff: emptyStaff() }));
 
-  const links = await db
-    .select({
-      gameId: gameStaff.gameId,
-      role: gameStaff.role,
-      id: user.id,
-      name: user.name,
-      email: user.email,
-    })
-    .from(gameStaff)
-    .innerJoin(user, eq(gameStaff.userId, user.id))
-    .where(
-      inArray(
-        gameStaff.gameId,
-        rows.map((row) => row.id),
-      ),
-    );
+  const gameIds = rows.map((row) => row.id);
+  const links = [];
+  for (const chunk of chunkIds(gameIds)) {
+    const part = await db
+      .select({
+        gameId: gameStaff.gameId,
+        role: gameStaff.role,
+        id: user.id,
+        name: user.name,
+        email: user.email,
+      })
+      .from(gameStaff)
+      .innerJoin(user, eq(gameStaff.userId, user.id))
+      .where(inArray(gameStaff.gameId, chunk));
+    links.push(...part);
+  }
 
   const byGame = new Map<number, GameStaffSlots>();
   for (const link of links) {
@@ -367,10 +373,14 @@ function assertTeamRequirement(status: GameStatus, count: number) {
 
 async function assertTeamsInSeason(db: Db, seasonId: number, ids: number[]) {
   if (ids.length === 0) return [];
-  const linked = await db
-    .select()
-    .from(teams)
-    .where(and(eq(teams.seasonId, seasonId), inArray(teams.id, ids)));
+  const linked: (typeof teams.$inferSelect)[] = [];
+  for (const chunk of chunkIds(ids)) {
+    const part = await db
+      .select()
+      .from(teams)
+      .where(and(eq(teams.seasonId, seasonId), inArray(teams.id, chunk)));
+    linked.push(...part);
+  }
   if (linked.length !== ids.length) {
     const missing = ids.filter((id) => !linked.some((team) => team.id === id));
     throw new NotFoundError(`Teams ${missing.join(", ")}`);
@@ -384,8 +394,10 @@ function defaultName(teamsLinked: TeamRef[], fallback = "TBD vs TBD") {
   return teamsLinked.map((team) => team.name).join(" Vs. ");
 }
 
-export async function getById(db: Db, id: number) {
-  const game = await db.query.games.findFirst({ where: eq(games.id, id) });
+export async function getById(db: Db, id: number, region?: GameRegion) {
+  const game = await db.query.games.findFirst({
+    where: and(eq(games.id, id), matchRegion(region)),
+  });
   if (!game) return null;
 
   const [gameTeams, gameStats, season, [withStaff]] = await Promise.all([
@@ -431,13 +443,16 @@ export async function getById(db: Db, id: number) {
   ]);
 
   const teamIds = gameTeams.map((team) => team.id);
-  const roster =
-    teamIds.length === 0
-      ? []
-      : await db
-          .select({ teamId: teamsPlayers.teamId, playerId: teamsPlayers.playerId })
-          .from(teamsPlayers)
-          .where(inArray(teamsPlayers.teamId, teamIds));
+  const roster = [];
+  if (teamIds.length > 0) {
+    for (const chunk of chunkIds(teamIds)) {
+      const part = await db
+        .select({ teamId: teamsPlayers.teamId, playerId: teamsPlayers.playerId })
+        .from(teamsPlayers)
+        .where(inArray(teamsPlayers.teamId, chunk));
+      roster.push(...part);
+    }
+  }
 
   const playerIdsByTeam = new Map<number, number[]>();
   for (const row of roster) {
@@ -533,7 +548,11 @@ export async function createByNames(
   db: Db,
   input: Omit<GameInput, "teamIds" | "team1Id" | "team2Id"> & { teamNames: string[] },
 ) {
-  const linked = await db.select().from(teams).where(inArray(teams.name, input.teamNames));
+  const linked: (typeof teams.$inferSelect)[] = [];
+  for (const chunk of chunkValues(input.teamNames)) {
+    const part = await db.select().from(teams).where(inArray(teams.name, chunk));
+    linked.push(...part);
+  }
   if (linked.length !== input.teamNames.length) {
     const missing = input.teamNames.filter((name) => !linked.some((team) => team.name === name));
     throw new NotFoundError(`Teams ${missing.join(", ")}`);

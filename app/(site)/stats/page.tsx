@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { api } from "@server/trpc/server";
+import { getSiteRegionQuery } from "@server/site-region";
 import { EmptyState } from "@components/site/empty-state";
 import { StatsLeaderboard } from "@components/site/stats-leaderboard";
 import { isStageRound } from "@/lib/stats/stage-rounds";
@@ -17,14 +18,14 @@ export default async function StatsPage({
   searchParams: Promise<{ season?: string; round?: string }>;
 }) {
   const { season, round } = await searchParams;
-  const trpc = await api();
+  const [trpc, { query }] = await Promise.all([api(), getSiteRegionQuery()]);
   const parsed = season ? Number.parseInt(season, 10) : Number.NaN;
   const seasonId = Number.isInteger(parsed) && parsed > 0 ? parsed : undefined;
   const stageRound = round && isStageRound(round) ? round : undefined;
 
   const [rows, allSeasons] = await Promise.all([
-    trpc.stats.leaderboard({ seasonId, stageRound }),
-    trpc.seasons.list(),
+    trpc.stats.leaderboard({ seasonId, stageRound, ...query }),
+    trpc.seasons.list(query),
   ]);
 
   return (

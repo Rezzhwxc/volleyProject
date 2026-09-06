@@ -3,7 +3,9 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { api } from "@server/trpc/server";
+import { getSiteRegion } from "@server/site-region";
 import { cn } from "@/lib/utils";
+import { regionQuery, type SiteRegion } from "@/lib/region";
 
 export const dynamic = "force-dynamic";
 
@@ -12,15 +14,16 @@ interface Params {
 }
 
 // Cached so generateMetadata and the page share one fetch per request.
-const load = cache(async (id: string) => {
+const load = cache(async (id: string, region: SiteRegion) => {
   const parsed = Number.parseInt(id, 10);
   if (!Number.isInteger(parsed) || parsed <= 0) return null;
-  return (await api()).seasons.byId({ id: parsed });
+  return (await api()).seasons.byId({ id: parsed, ...regionQuery(region) });
 });
 
 export async function generateMetadata({ params }: Params): Promise<Metadata> {
   const { id } = await params;
-  const season = await load(id);
+  const region = await getSiteRegion();
+  const season = await load(id, region);
   if (!season) return { title: "Season not found" };
 
   const title = `Season ${season.seasonNumber}`;
@@ -62,10 +65,14 @@ function isPodium(placement: string) {
 
 export default async function SeasonPage({ params }: Params) {
   const { id } = await params;
-  const season = await load(id);
+  const region = await getSiteRegion();
+  const season = await load(id, region);
   if (!season) notFound();
 
-  const roster = await (await api()).teams.playersBySeason({ seasonId: season.id });
+  const roster = await (await api()).teams.playersBySeason({
+    seasonId: season.id,
+    ...regionQuery(region),
+  });
   const byTeam = new Map<number, { id: number; name: string; position: string }[]>();
   for (const row of roster) {
     byTeam.set(row.teamId, [

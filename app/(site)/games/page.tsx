@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { api } from "@server/trpc/server";
+import { getSiteRegionQuery } from "@server/site-region";
 import { EmptyState } from "@components/site/empty-state";
 import { GamesList } from "@components/site/games-list";
 import { PageHeader } from "@components/site/page-header";
@@ -12,8 +13,8 @@ export const metadata: Metadata = {
 };
 
 export default async function GamesPage() {
-  const trpc = await api();
-  const rows = await trpc.games.listPlayed();
+  const [trpc, { query }] = await Promise.all([api(), getSiteRegionQuery()]);
+  const rows = await trpc.games.listPlayed(query);
 
   return (
     <div className="font-display">

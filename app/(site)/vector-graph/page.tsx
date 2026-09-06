@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { api } from "@server/trpc/server";
+import { getSiteRegionQuery } from "@server/site-region";
 import { VectorGraphClient } from "@components/site/vector-graph-client";
 
 export const dynamic = "force-dynamic";
@@ -11,8 +12,11 @@ export const metadata: Metadata = {
 };
 
 export default async function VectorGraphRoute() {
-  const trpc = await api();
-  const [players, seasons] = await Promise.all([trpc.stats.vectorGraph(), trpc.seasons.list()]);
+  const [trpc, { query }] = await Promise.all([api(), getSiteRegionQuery()]);
+  const [players, seasons] = await Promise.all([
+    trpc.stats.vectorGraph(query),
+    trpc.seasons.list(query),
+  ]);
 
   return (
     <VectorGraphClient

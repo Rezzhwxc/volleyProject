@@ -44,3 +44,10 @@ export function parseTeamHeader(raw: string): string | null {
 export function namesEqual(a: string, b: string): boolean {
   return normalizeName(a) === normalizeName(b);
 }
+
+/** Bracket sheets use score-like placeholders (e.g. "0 0") instead of real team names. */
+export function isPlaceholderTeamName(value: string): boolean {
+  const name = normalizeName(value);
+  if (!name) return true;
+  return /^(?:0(?:\s+0)*)$/.test(name);
+}

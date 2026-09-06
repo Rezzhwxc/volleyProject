@@ -1,5 +1,6 @@
 import { parseCsv, cell } from "./csv";
-import { displayName, normalizeName, parseTeamHeader } from "./names";
+import { masterGameKey } from "./keys";
+import { displayName, isPlaceholderTeamName, normalizeName, parseTeamHeader } from "./names";
 import type { ParsedGame, ParsedTeam, SheetRegion, TeamLeadershipRole } from "./types";
 
 const REGION_TAB = /^(NA|EU|AS)\s+(TEAMS|QUALIFIERS|PLAYOFFS)$/i;
@@ -225,6 +226,7 @@ function isVolleyballSetScore(value: string): boolean {
 function looksLikeTeam(value: string): boolean {
   const name = displayName(value);
   if (!name || name.length < 2) return false;
+  if (isPlaceholderTeamName(name)) return false;
   if (/^date:/i.test(name)) return false;
   if (/^referee/i.test(name)) return false;
   if (/^media/i.test(name)) return false;
@@ -234,23 +236,6 @@ function looksLikeTeam(value: string): boolean {
   if (isScoreToken(name)) return false;
   if (/^(na|eu|as)\s+round/i.test(name)) return false;
   return true;
-}
-
-function gameKey(
-  region: SheetRegion,
-  phase: string,
-  team1: string,
-  team2: string,
-  score1: number | null,
-  score2: number | null,
-  round: string,
-): string {
-  const a = normalizeName(team1);
-  const b = normalizeName(team2);
-  const [left, right] = a < b ? [a, b] : [b, a];
-  const [sLeft, sRight] =
-    a < b ? [score1 ?? "x", score2 ?? "x"] : [score2 ?? "x", score1 ?? "x"];
-  return `${region}|${phase}|${round}|${left}|${right}|${sLeft}-${sRight}`;
 }
 
 export function parseMasterScheduleTab(
@@ -300,7 +285,7 @@ export function parseMasterScheduleTab(
       }
 
       games.push({
-        key: gameKey(region, phase, team1Name, team2Name, team1Score, team2Score, round),
+        key: masterGameKey(region, phase, team1Name, team2Name, team1Score, team2Score, round),
         region,
         phase,
         round,
@@ -376,7 +361,7 @@ export function parseMasterScheduleTab(
       const team1Name = displayName(top);
       const team2Name = displayName(bottom);
       games.push({
-        key: gameKey(region, phase, team1Name, team2Name, team1Wins, team2Wins, `${currentRound}@${index}`),
+        key: masterGameKey(region, phase, team1Name, team2Name, team1Wins, team2Wins, `${currentRound}@${index}`),
         region,
         phase,
         round: currentRound,

@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import type { LucideIcon } from "lucide-react";
 import {
@@ -290,6 +290,7 @@ export function PlayerProfile({
   name,
   position,
   avatarUrl,
+  robloxUserId = null,
   currentSeasonNumber,
   teams,
   stats,
@@ -298,6 +299,7 @@ export function PlayerProfile({
   name: string;
   position: string;
   avatarUrl: string | null;
+  robloxUserId?: string | null;
   currentSeasonNumber: number | null;
   teams: PlayerProfileTeam[];
   stats: PlayerProfileStat[];
@@ -305,6 +307,30 @@ export function PlayerProfile({
 }) {
   const [selectedSeason, setSelectedSeason] = useState("0");
   const [showAllGames, setShowAllGames] = useState(false);
+  const [src, setSrc] = useState(avatarUrl);
+
+  useEffect(() => {
+    setSrc(avatarUrl);
+  }, [avatarUrl]);
+
+  useEffect(() => {
+    if (avatarUrl) return;
+
+    const query = robloxUserId ? `?userId=${encodeURIComponent(robloxUserId)}` : "";
+    const controller = new AbortController();
+
+    void fetch(`/api/roblox/avatar/${encodeURIComponent(name)}${query}`, {
+      signal: controller.signal,
+    })
+      .then((response) => (response.ok ? response.json() : null))
+      .then((data) => {
+        const avatar = (data as { avatarUrl?: string | null } | null)?.avatarUrl;
+        if (avatar) setSrc(avatar);
+      })
+      .catch(() => {});
+
+    return () => controller.abort();
+  }, [avatarUrl, name, robloxUserId]);
 
   const uniqueSeasons = useMemo(
     () =>
@@ -385,9 +411,12 @@ export function PlayerProfile({
       <div className="mb-6 flex flex-wrap items-start justify-center gap-8">
         <div className="flex w-full max-w-[1200px] flex-nowrap items-center justify-center gap-8 px-4 max-[900px]:flex-col">
           <img
-            src={avatarUrl ?? "/images/pfpLogo.png"}
+            src={src ?? "/images/pfpLogo.png"}
             alt={`${name}'s avatar`}
             className="size-[580px] rounded-xl object-cover max-[900px]:size-[350px] max-[600px]:size-[250px]"
+            onError={() => {
+              if (src !== "/images/pfpLogo.png") setSrc("/images/pfpLogo.png");
+            }}
           />
           <div className="flex flex-col">
             <h1 className="mt-0 mb-4 text-[2.8rem] font-black uppercase leading-tight max-[900px]:text-[2rem] max-[600px]:text-[1.5rem]">

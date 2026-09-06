@@ -4,7 +4,44 @@ import { matchStatsToGames, mergeTeamRosters, rosterSizeWarnings } from "@server
 import { displayName, normalizeName, parseTeamHeader } from "@server/services/sheet-import/names";
 import { parseMasterScheduleTab, parseMasterTeamsTab } from "@server/services/sheet-import/parse-master";
 import { parseRegionalPlayersLeaderboard, parseRegionalTeamTab, parseRegionalWorkbook } from "@server/services/sheet-import/parse-regional";
-import type { ParsedGame, ParsedScoreBlock } from "@server/services/sheet-import/types";
+import { toClientPreview } from "@server/services/sheet-import/preview";
+import {
+  createSheetImportSession,
+  mergeSheetImportSession,
+  requireSheetImportSession,
+} from "@server/services/sheet-import/session";
+import type { ParsedGame, ParsedScoreBlock, SheetImportPreview } from "@server/services/sheet-import/types";
+import {
+  importKeyFromStoredGame,
+  masterGameKey,
+  syntheticGameKey,
+} from "@server/services/sheet-import/keys";
+
+describe("import game keys", () => {
+  it("builds stable master and synthetic keys", () => {
+    expect(masterGameKey("na", "qualifiers", "Teiko", "Tenjiku", 3, 1, "Round 1")).toBe(
+      "na|qualifiers|Round 1|teiko|tenjiku|3-1",
+    );
+    expect(syntheticGameKey("eu", "Night Owls", "Polar Tips", 3, 2)).toBe(
+      "eu|stats|night owls|polar tips|3-2",
+    );
+  });
+
+  it("reconstructs stored synthetic game keys", () => {
+    expect(
+      importKeyFromStoredGame({
+        region: "na",
+        phase: "playoffs",
+        round: "From stats sheet",
+        date: "1970-01-01",
+        team1Name: "Teiko",
+        team2Name: "Tenjiku",
+        team1Score: 3,
+        team2Score: 1,
+      }),
+    ).toBe("na|stats|teiko|tenjiku|3-1");
+  });
+});
 
 describe("parseSheetNamesFromHtml", () => {
   it("reads items.push name entries from public htmlview", () => {
@@ -143,26 +180,23 @@ describe("parseMasterScheduleTab", () => {
     expect(games[1]?.forfeit).toBe(true);
   });
 
-  it("skips zero-set playoff rows and reads real set totals", () => {
+  it("skips zero-set playoff rows and ignores placeholder team names", () => {
     const csv = [
       `"","Losers Finals","","TT9","0","0"`,
       `"","Losers Finals","","0 0","0","0"`,
       `"","Grand-Finals","","TT9","25","25"`,
-      `"","Grand-Finals","","0 0","20","18"`,
+      `"","Grand-Finals","","Mambas","20","18"`,
     ].join("\n");
 
     const { games } = parseMasterScheduleTab(csv, "na", "playoffs", 2026);
     expect(games.every((game) => (game.team1Score ?? 0) + (game.team2Score ?? 0) > 0)).toBe(true);
+    expect(games.every((game) => !/^(?:0(?:\s+0)*)$/i.test(game.team1Name) && !/^(?:0(?:\s+0)*)$/i.test(game.team2Name))).toBe(true);
     const tt9 = games.find(
-      (game) =>
-        (game.team1Name === "TT9" && game.team2Name === "0 0") ||
-        (game.team2Name === "TT9" && game.team1Name === "0 0"),
+      (game) => game.team1Name === "TT9" || game.team2Name === "TT9",
     );
     expect(tt9).toBeDefined();
     const tt9Sets = tt9!.team1Name === "TT9" ? tt9!.team1Score : tt9!.team2Score;
-    const zeroSets = tt9!.team1Name === "0 0" ? tt9!.team1Score : tt9!.team2Score;
     expect(tt9Sets).toBe(2);
-    expect(zeroSets).toBe(0);
   });
 });
 
@@ -346,7 +380,7 @@ describe("matchStatsToGames", () => {
     expect(matched.warnings).toHaveLength(0);
   });
 
-  it("synthesizes a schedule row from a stats block when the bracket omitted the match", () => {
+  it("ignores stats blocks attributed to placeholder bracket cells", () => {
     const matched = matchStatsToGames([], [
       {
         teamName: "0 0",
@@ -374,9 +408,109 @@ describe("matchStatsToGames", () => {
         ],
       },
     ]);
-    expect(matched.syntheticGames).toHaveLength(1);
-    expect(matched.syntheticGames[0]?.team2Name).toBe("TT9");
-    expect(matched.stats).toHaveLength(1);
-    expect(matched.warnings).toHaveLength(0);
+    expect(matched.syntheticGames).toHaveLength(0);
+    expect(matched.stats).toHaveLength(0);
+  });
+});
+
+describe("toClientPreview", () => {
+  it("drops stat rows but keeps the full count", () => {
+    const preview = {
+      mode: "full",
+      seasonNumber: 2,
+      seasonId: null,
+      counts: {
+        teams: 1,
+        players: 1,
+        playersNew: 1,
+        playersExisting: 0,
+        games: 1,
+        stats: 2,
+        warnings: 0,
+        errors: 0,
+      },
+      teams: [],
+      players: [],
+      games: [],
+      stats: [
+        {
+          gameKey: "a",
+          teamName: "Teiko",
+          playerName: "ace",
+          counts: {
+            spikeKills: 1,
+            spikeAttempts: 2,
+            spikingErrors: 0,
+            apeKills: 0,
+            apeAttempts: 0,
+            assists: 0,
+            settingErrors: 0,
+            blocks: 0,
+            blockFollows: 0,
+            digs: 0,
+            aces: 0,
+            servingErrors: 0,
+            miscErrors: 0,
+          },
+        },
+        {
+          gameKey: "a",
+          teamName: "Teiko",
+          playerName: "lib",
+          counts: {
+            spikeKills: 0,
+            spikeAttempts: 0,
+            spikingErrors: 0,
+            apeKills: 0,
+            apeAttempts: 0,
+            assists: 0,
+            settingErrors: 0,
+            blocks: 0,
+            blockFollows: 0,
+            digs: 4,
+            aces: 0,
+            servingErrors: 0,
+            miscErrors: 0,
+          },
+        },
+      ],
+      warnings: [],
+      errors: [],
+    } satisfies SheetImportPreview;
+
+    const slim = toClientPreview(preview);
+    expect(slim.counts.stats).toBe(2);
+    expect(slim.stats).toEqual([]);
+  });
+});
+
+describe("sheet import session", () => {
+  it("merges master then regional batches", async () => {
+    const sessionId = await createSheetImportSession();
+    await mergeSheetImportSession(sessionId, {
+      masterTeams: [{ name: "Teiko", region: "na", playerNames: ["ace"] }],
+      masterGames: [],
+      sourceWarnings: ["master note"],
+    });
+    await mergeSheetImportSession(sessionId, {
+      regionalTeams: [{ name: "Teiko", region: "na", playerNames: ["ace", "lib"] }],
+      regionalBlocks: [
+        {
+          teamName: "Teiko",
+          region: "na",
+          winnerName: "Teiko",
+          teamScore: 2,
+          opponentScore: 0,
+          rows: [],
+        },
+      ],
+      sourceWarnings: ["na note"],
+    });
+
+    const sources = await requireSheetImportSession(sessionId);
+    expect(sources.masterTeams).toHaveLength(1);
+    expect(sources.regionalTeams).toHaveLength(1);
+    expect(sources.regionalBlocks).toHaveLength(1);
+    expect(sources.sourceWarnings).toEqual(["master note", "na note"]);
   });
 });

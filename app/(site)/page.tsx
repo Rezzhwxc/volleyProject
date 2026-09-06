@@ -2,6 +2,7 @@ import Link from "next/link";
 import { getDb } from "@db";
 import { api } from "@server/trpc/server";
 import { homeNumbers } from "@server/services";
+import { getSiteRegionQuery } from "@server/site-region";
 import { HomeBracket } from "@components/site/home-bracket";
 import { HomeMatches } from "@components/site/home-matches";
 import { HomeSpotlightRail, type SpotlightCard } from "@components/site/home-spotlight-rail";
@@ -53,20 +54,20 @@ function setLine(match: {
 }
 
 export default async function HomePage() {
-  const trpc = await api();
+  const [trpc, { selected, query }] = await Promise.all([api(), getSiteRegionQuery()]);
 
   const [seasonRows, articleRows, playerCount] = await Promise.all([
-    trpc.seasons.list(),
+    trpc.seasons.list(query),
     trpc.articles.list(),
-    trpc.players.count(),
+    trpc.players.count(query),
   ]);
 
   const season = seasonRows[0] ?? null;
 
   const [matchRows, { numbers, avatars }, teamRows] = await Promise.all([
-    season ? trpc.games.listSchedule({ seasonId: season.id }) : Promise.resolve([]),
-    homeNumbers.loadHomeNumbers(getDb(), season?.id ?? null),
-    trpc.teams.list(),
+    season ? trpc.games.listSchedule({ seasonId: season.id, ...query }) : Promise.resolve([]),
+    homeNumbers.loadHomeNumbers(getDb(), season?.id ?? null, query),
+    trpc.teams.list(query),
   ]);
 
   const sortedArticles = [...articleRows].sort((a, b) => b.id - a.id);
@@ -118,7 +119,7 @@ export default async function HomePage() {
             <div className="relative flex min-h-[min(78svh,820px)] flex-col justify-end px-5 pt-16 pb-36 sm:px-8 sm:pb-40 xl:px-14">
               <span className="mb-4 inline-block w-fit border border-white/35 px-3 py-1.5 font-mono text-[0.64rem] uppercase tracking-[0.2em] text-white/85">
                 {season
-                  ? `Season ${season.seasonNumber} · ${phase} · ${playerCount.toLocaleString()} players`
+                  ? `Season ${season.seasonNumber} · ${phase} · ${selected.toUpperCase()} · ${playerCount.toLocaleString()} players`
                   : `${playerCount.toLocaleString()} players tracked`}
               </span>
               <h1 className="max-w-[22ch] text-balance text-[2.2rem] font-black uppercase leading-[0.92] tracking-[-0.035em] text-white sm:text-[2.8rem] lg:text-[3.4rem]">
@@ -190,17 +191,17 @@ export default async function HomePage() {
                 className="block text-inherit no-underline"
               >
                 <div className={label}>{entry.metric}</div>
-                <div className="my-3 flex items-end gap-4">
+                <div className="my-4 flex items-end gap-5">
                   <img
                     src={avatars[entry.name] ?? "/images/pfpLogo.png"}
                     alt=""
-                    className="size-16 shrink-0 rounded-xs border border-rvl-line object-cover object-top"
+                    className="size-24 shrink-0 rounded-xs border border-rvl-line object-cover object-center sm:size-28"
                   />
-                  <div className="font-mono text-[2.9rem] font-bold leading-none tracking-[-0.045em] tabular-nums text-rvl-accent">
+                  <div className="font-mono text-[3.8rem] font-bold leading-none tracking-[-0.05em] tabular-nums text-rvl-accent sm:text-[4.6rem]">
                     {entry.value}
                   </div>
                 </div>
-                <div className="text-[1.02rem] font-semibold">{entry.name}</div>
+                <div className="text-[1.15rem] font-semibold">{entry.name}</div>
                 <div className="mt-1 font-mono text-[0.62rem] uppercase tracking-[0.12em] text-rvl-dim">
                   {entry.context}
                 </div>

@@ -214,4 +214,12 @@ describe("authorization sweep", () => {
       expect(code, `${entry.procedure} rejected an anonymous caller`).not.toBe("UNAUTHORIZED");
     }
   });
+
+  it("scopes public list queries from ctx.region without an input", async () => {
+    const caller = createCaller({ db, user: null, region: "eu" });
+    const rows = await caller.games.list();
+    expect(rows.map((row) => row.id)).toEqual([5]);
+    expect(await caller.games.listPlayed()).toEqual([]);
+    expect(await caller.records.list()).toEqual([]);
+  });
 });

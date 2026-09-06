@@ -1,6 +1,7 @@
+import { env } from "cloudflare:workers";
 import { TRPCError } from "@trpc/server";
-import { teams, sheetImport } from "@server/services";
-import { adminProcedure, protectedProcedure, publicProcedure, router } from "../init";
+import { teams, sheetImport, type AssembledSources, type SheetImportPreview } from "@server/services";
+import { adminProcedure, protectedProcedure, publicProcedure, router, scopedRegion } from "../init";
 import { revalidate } from "../revalidate";
 import {
   bySeason,
@@ -9,15 +10,18 @@ import {
   teamCreate,
   teamUpdate,
   teamProfileUpdate,
+  optionalRegion,
   sheetImportTeams,
 } from "../schemas";
 import { z } from "zod";
 
 export const teamsRouter = router({
-  list: publicProcedure.query(({ ctx }) => teams.list(ctx.db)),
+  list: publicProcedure
+    .input(optionalRegion)
+    .query(({ ctx, input }) => teams.list(ctx.db, scopedRegion(ctx, input?.region))),
 
   byName: publicProcedure.input(byTeamName).query(async ({ ctx, input }) => {
-    const team = await teams.getByName(ctx.db, input.name);
+    const team = await teams.getByName(ctx.db, input.name, scopedRegion(ctx));
     if (!team) return null;
     const canEdit = await teams.canManageProfile(ctx.db, team.id, ctx.user);
     return { ...team, canEdit };
@@ -25,7 +29,9 @@ export const teamsRouter = router({
 
   playersBySeason: publicProcedure
     .input(bySeason)
-    .query(({ ctx, input }) => teams.listPlayersBySeason(ctx.db, input.seasonId)),
+    .query(({ ctx, input }) =>
+      teams.listPlayersBySeason(ctx.db, input.seasonId, scopedRegion(ctx, input.region)),
+    ),
 
   count: adminProcedure.query(({ ctx }) => teams.count(ctx.db)),
 
@@ -75,14 +81,21 @@ export const teamsRouter = router({
   }),
 
   commitSheetImport: adminProcedure.input(sheetImportTeams).mutation(async ({ ctx, input }) => {
-    const result = await sheetImport.commitSheetImport(ctx.db, {
-      mode: input.mode,
-      seasonId: input.seasonId,
-      masterUrl: input.masterUrl,
-      regionalUrls: input.regionalUrls,
-      excludeTeamKeys: input.excludeTeamKeys,
-      excludeGameKeys: input.excludeGameKeys,
-    });
+    const result = await sheetImport.commitSheetImport(
+      ctx.db,
+      {
+        mode: input.mode,
+        seasonId: input.seasonId,
+        masterUrl: input.masterUrl,
+        regionalUrls: input.regionalUrls,
+        sessionId: input.sessionId,
+        sources: input.sources as AssembledSources | undefined,
+        preview: input.preview as SheetImportPreview | undefined,
+        excludeTeamKeys: input.excludeTeamKeys,
+        excludeGameKeys: input.excludeGameKeys,
+      },
+      { d1: env.DB },
+    );
     revalidate("/teams", "/portal/teams", "/players", "/portal/players");
     return result;
   }),

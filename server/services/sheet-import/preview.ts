@@ -1,12 +1,14 @@
 import { eq, inArray } from "drizzle-orm";
 import type { Db } from "@db";
+import { chunkValues } from "@db/insert";
 import { players, seasons } from "@db/schema";
 import { BadRequestError } from "../errors";
 import { matchStatsToGames, mergeTeamRosters, rosterSizeWarnings } from "./match";
-import { normalizeName } from "./names";
+import { isPlaceholderTeamName, normalizeName } from "./names";
 import { loadMasterSource, loadRegionalSource } from "./sources";
 import type { FetchImpl } from "./fetch";
 import type {
+  AssembledSources,
   ParsedGame,
   ParsedScoreBlock,
   ParsedTeam,
@@ -18,6 +20,8 @@ import type {
   PreviewPlayer,
 } from "./types";
 
+export type { AssembledSources };
+
 function teamKey(name: string, region: SheetRegion | null): string {
   return `${region ?? "all"}:${normalizeName(name)}`;
 }
@@ -27,13 +31,18 @@ function yearFromDate(iso?: string): number {
   return new Date().getUTCFullYear();
 }
 
+function formatNameSample(names: string[], max = 5): string {
+  const unique = [...new Set(names)];
+  const head = unique.slice(0, max).map((name) => `"${name}"`).join(", ");
+  const rest = unique.length > max ? `, +${unique.length - max} more` : "";
+  return head + rest;
+}
+
 async function existingPlayerNames(db: Db, names: string[]): Promise<Set<string>> {
   if (names.length === 0) return new Set();
   const lowered = [...new Set(names.map((name) => name.toLowerCase()))];
   const found = new Set<string>();
-  const chunkSize = 80;
-  for (let index = 0; index < lowered.length; index += chunkSize) {
-    const chunk = lowered.slice(index, index + chunkSize);
+  for (const chunk of chunkValues(lowered)) {
     const rows = await db
       .select({ name: players.name })
       .from(players)
@@ -43,19 +52,17 @@ async function existingPlayerNames(db: Db, names: string[]): Promise<Set<string>
   return found;
 }
 
-export interface AssembledSources {
-  masterTeams: ParsedTeam[];
-  masterGames: ParsedGame[];
-  regionalTeams: ParsedTeam[];
-  regionalBlocks: ParsedScoreBlock[];
-  sourceWarnings: string[];
-}
-
 export async function validateSheetImportMeta(
   db: Db,
   input: SheetImportInput,
-): Promise<{ errors: string[]; seasonNumber: number | null; seasonId: number | null }> {
+): Promise<{
+  errors: string[];
+  warnings: string[];
+  seasonNumber: number | null;
+  seasonId: number | null;
+}> {
   const errors: string[] = [];
+  const warnings: string[] = [];
   let seasonNumber: number | null = input.seasonNumber ?? null;
   let seasonId: number | null = input.seasonId ?? null;
   const mode = input.mode;
@@ -63,14 +70,16 @@ export async function validateSheetImportMeta(
   if (mode === "full") {
     if (input.seasonNumber == null) errors.push("Season number is required");
     if (!input.startDate) errors.push("Start date is required");
-    if (!input.masterUrl && input.seasonNumber != null) {
-      // master may be supplied via assembled sources instead of URL on assemble path
-    }
     if (input.seasonNumber != null) {
       const existing = await db.query.seasons.findFirst({
         where: eq(seasons.seasonNumber, input.seasonNumber),
       });
-      if (existing) errors.push(`Season ${input.seasonNumber} already exists`);
+      if (existing) {
+        warnings.push(
+          `Season ${input.seasonNumber} already exists — import will resume into season ${existing.id}.`,
+        );
+        seasonId = existing.id;
+      }
       seasonNumber = input.seasonNumber;
     }
   } else {
@@ -85,7 +94,7 @@ export async function validateSheetImportMeta(
     }
   }
 
-  return { errors, seasonNumber, seasonId };
+  return { errors, warnings, seasonNumber, seasonId };
 }
 
 export async function assembleSheetImportPreview(
@@ -93,9 +102,10 @@ export async function assembleSheetImportPreview(
   input: SheetImportInput,
   sources: AssembledSources,
 ): Promise<SheetImportPreview> {
-  const { errors: metaErrors, seasonNumber, seasonId } = await validateSheetImportMeta(db, input);
+  const { errors: metaErrors, warnings: metaWarnings, seasonNumber, seasonId } =
+    await validateSheetImportMeta(db, input);
   const errors = [...metaErrors];
-  const warnings = [...sources.sourceWarnings];
+  const warnings = [...sources.sourceWarnings, ...metaWarnings];
   const mode = input.mode;
 
   if (mode === "full" && sources.masterTeams.length === 0) {
@@ -232,10 +242,12 @@ export async function assembleSheetImportPreview(
 
   if (includeTeams && includeGames) {
     const known = new Set(teams.map((team) => normalizeName(team.name)));
+    const stubTeamsFromGames: string[] = [];
     for (const game of games) {
       for (const name of [game.team1Name, game.team2Name]) {
+        if (isPlaceholderTeamName(name)) continue;
         if (!known.has(normalizeName(name))) {
-          warnings.push(`Game references team "${name}" which was not found on TEAMS tabs`);
+          stubTeamsFromGames.push(name);
           const key = teamKey(name, game.region);
           teams.push({
             key,
@@ -248,12 +260,37 @@ export async function assembleSheetImportPreview(
         }
       }
     }
+    if (stubTeamsFromGames.length > 0) {
+      warnings.push(
+        `${stubTeamsFromGames.length} schedule-only team(s) will be created from game references (${formatNameSample(stubTeamsFromGames)})`,
+      );
+    }
   }
 
   const newNames = new Set(playerRows.filter((row) => !row.exists).map((row) => row.name));
   const existingNames = new Set(playerRows.filter((row) => row.exists).map((row) => row.name));
 
   warnings.push(...rosterSizeWarnings(teams));
+
+  if (includePlayers) {
+    const teamsByPlayer = new Map<string, { label: string; teams: string[] }>();
+    for (const team of activeTeams) {
+      if (isPlaceholderTeamName(team.name)) continue;
+      for (const playerName of team.playerNames) {
+        const key = normalizeName(playerName);
+        const entry = teamsByPlayer.get(key) ?? { label: playerName, teams: [] };
+        if (!entry.teams.includes(team.name)) entry.teams.push(team.name);
+        teamsByPlayer.set(key, entry);
+      }
+    }
+    for (const entry of teamsByPlayer.values()) {
+      if (entry.teams.length > 1) {
+        warnings.push(
+          `Player "${entry.label}" appears on multiple teams: ${entry.teams.join(", ")}`,
+        );
+      }
+    }
+  }
 
   if (includePlayers) {
     for (const team of teams.filter((row) => row.included)) {
@@ -287,6 +324,12 @@ export async function assembleSheetImportPreview(
     warnings,
     errors,
   };
+}
+
+/** Drop stat rows from the preview JSON. S2-sized seasons overflow the Worker HTML error page. */
+export function toClientPreview(preview: SheetImportPreview): SheetImportPreview {
+  if (preview.stats.length === 0) return preview;
+  return { ...preview, stats: [] };
 }
 
 export async function buildSheetImportPreview(
@@ -323,7 +366,8 @@ export async function buildSheetImportPreview(
       sourceWarnings.push(...regional.warnings);
     }
   } catch (error) {
-    const { errors, seasonNumber, seasonId } = await validateSheetImportMeta(db, input);
+    const { errors, warnings: metaWarnings, seasonNumber, seasonId } =
+      await validateSheetImportMeta(db, input);
     errors.push(error instanceof Error ? error.message : String(error));
     return {
       mode: input.mode,
@@ -336,14 +380,14 @@ export async function buildSheetImportPreview(
         playersExisting: 0,
         games: 0,
         stats: 0,
-        warnings: 0,
+        warnings: metaWarnings.length,
         errors: errors.length,
       },
       teams: [],
       players: [],
       games: [],
       stats: [],
-      warnings: [],
+      warnings: metaWarnings,
       errors,
     };
   }

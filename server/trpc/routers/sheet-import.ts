@@ -1,71 +1,35 @@
 import { z } from "zod";
-import { sheetImport } from "@server/services";
+import { sheetImport, type AssembledSources } from "@server/services";
 import { adminProcedure, router } from "../init";
-import { sheetImportFull, sheetImportTeams, isoDate } from "../schemas";
+import {
+  sheetImportAssembleFull,
+  sheetImportAssembleTeams,
+  isoDate,
+} from "../schemas";
 
 const sheetUrl = z.string().url();
-
-const parsedTeam = z.object({
-  name: z.string(),
-  region: z.enum(["na", "eu", "as"]).nullable(),
-  playerNames: z.array(z.string()),
-});
-
-const parsedGame = z.object({
-  key: z.string(),
-  region: z.enum(["na", "eu", "as"]),
-  phase: z.enum(["qualifiers", "playoffs"]),
-  round: z.string(),
-  date: z.string(),
-  team1Name: z.string(),
-  team2Name: z.string(),
-  team1Score: z.number().nullable(),
-  team2Score: z.number().nullable(),
-  setScores: z.array(z.string()),
-  forfeit: z.boolean(),
-});
-
-const statCounts = z.object({
-  spikeKills: z.number(),
-  spikeAttempts: z.number(),
-  spikingErrors: z.number(),
-  apeKills: z.number(),
-  apeAttempts: z.number(),
-  assists: z.number(),
-  settingErrors: z.number(),
-  blocks: z.number(),
-  blockFollows: z.number(),
-  digs: z.number(),
-  aces: z.number(),
-  servingErrors: z.number(),
-  miscErrors: z.number(),
-});
-
-const parsedBlock = z.object({
-  teamName: z.string(),
-  region: z.enum(["na", "eu", "as"]),
-  winnerName: z.string(),
-  teamScore: z.number(),
-  opponentScore: z.number(),
-  rows: z.array(statCounts.extend({ playerName: z.string() })),
-});
-
-const assembledSources = z.object({
-  masterTeams: z.array(parsedTeam),
-  masterGames: z.array(parsedGame),
-  regionalTeams: z.array(parsedTeam),
-  regionalBlocks: z.array(parsedBlock),
-  sourceWarnings: z.array(z.string()),
-});
+const sessionId = z.string().uuid();
 
 export const sheetImportRouter = router({
+  startSession: adminProcedure.mutation(async () => {
+    return { sessionId: await sheetImport.createSheetImportSession() };
+  }),
+
   loadMaster: adminProcedure
-    .input(z.object({ url: sheetUrl, startDate: isoDate.optional() }))
+    .input(z.object({ url: sheetUrl, startDate: isoDate.optional(), sessionId: sessionId.optional() }))
     .mutation(async ({ input }) => {
       const year = input.startDate
         ? Number.parseInt(input.startDate.slice(0, 4), 10)
         : new Date().getUTCFullYear();
-      return sheetImport.loadMasterSource(input.url, year);
+      const master = await sheetImport.loadMasterSource(input.url, year);
+      if (input.sessionId) {
+        await sheetImport.mergeSheetImportSession(input.sessionId, {
+          masterTeams: master.teams,
+          masterGames: master.games,
+          sourceWarnings: master.warnings,
+        });
+      }
+      return master;
     }),
 
   loadRegionalBatch: adminProcedure
@@ -75,30 +39,34 @@ export const sheetImportRouter = router({
         region: z.enum(["na", "eu", "as"]),
         startIndex: z.number().int().nonnegative().optional(),
         batchSize: z.number().int().positive().max(12).optional(),
+        sessionId: sessionId.optional(),
       }),
     )
     .mutation(async ({ input }) => {
-      return sheetImport.loadRegionalSourceBatch({
+      const batch = await sheetImport.loadRegionalSourceBatch({
         url: input.url,
         region: input.region,
-        startIndex: input.startIndex,
-        batchSize: input.batchSize,
+        ...(input.startIndex != null ? { startIndex: input.startIndex } : {}),
+        ...(input.batchSize != null ? { batchSize: input.batchSize } : {}),
       });
+      if (input.sessionId) {
+        await sheetImport.mergeSheetImportSession(input.sessionId, {
+          regionalTeams: batch.teams,
+          regionalBlocks: batch.blocks,
+          sourceWarnings: batch.warnings,
+        });
+      }
+      return batch;
     }),
 
   assemblePreview: adminProcedure
-    .input(
-      z.union([
-        sheetImportFull.omit({ masterUrl: true, regionalUrls: true }).extend({
-          sources: assembledSources,
-        }),
-        sheetImportTeams.omit({ masterUrl: true, regionalUrls: true }).extend({
-          sources: assembledSources,
-        }),
-      ]),
-    )
+    .input(z.union([sheetImportAssembleFull, sheetImportAssembleTeams]))
     .mutation(async ({ ctx, input }) => {
-      const { sources, ...meta } = input;
-      return sheetImport.assembleSheetImportPreview(ctx.db, meta, sources);
+      const { sources: posted, sessionId: importSessionId, ...meta } = input;
+      const sources = posted
+        ? (posted as AssembledSources)
+        : await sheetImport.requireSheetImportSession(importSessionId!);
+      const preview = await sheetImport.assembleSheetImportPreview(ctx.db, meta, sources);
+      return sheetImport.toClientPreview(preview);
     }),
 });

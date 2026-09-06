@@ -15,6 +15,9 @@ const REGION_GROUPS: { id: SheetRegion; label: string }[] = [
 ];
 
 export type SheetImportPreviewData = {
+  mode: "full" | "teams" | "teams_and_players" | "players";
+  seasonNumber: number | null;
+  seasonId: number | null;
   counts: {
     teams: number;
     players: number;
@@ -28,22 +31,23 @@ export type SheetImportPreviewData = {
   teams: {
     key: string;
     name: string;
-    region: string | null;
+    region: SheetRegion | null;
     playerNames: string[];
-    leadership?: Partial<Record<"C" | "VC" | "CC", string>>;
+    leadership?: Partial<Record<"C" | "VC" | "CC", string>> | undefined;
     included: boolean;
   }[];
   players: { name: string; teamName: string; exists: boolean }[];
   games: {
     key: string;
-    region: string;
-    phase: string;
+    region: SheetRegion;
+    phase: "qualifiers" | "playoffs";
     round: string;
     date: string;
     team1Name: string;
     team2Name: string;
     team1Score: number | null;
     team2Score: number | null;
+    setScores: string[];
     matchedStatCount: number;
     included: boolean;
     forfeit: boolean;
@@ -52,7 +56,21 @@ export type SheetImportPreviewData = {
     gameKey: string;
     teamName: string;
     playerName: string;
-    counts: { spikeKills: number; digs: number; assists: number; blocks: number };
+    counts: {
+      spikeKills: number;
+      spikeAttempts: number;
+      spikingErrors: number;
+      apeKills: number;
+      apeAttempts: number;
+      assists: number;
+      settingErrors: number;
+      blocks: number;
+      blockFollows: number;
+      digs: number;
+      aces: number;
+      servingErrors: number;
+      miscErrors: number;
+    };
   }[];
   warnings: string[];
   errors: string[];
@@ -504,6 +522,14 @@ export function SheetImportPreviewTables({
                 </tr>
               </thead>
               <tbody>
+                {filteredStats.length === 0 && preview.counts.stats > 0 ? (
+                  <tr>
+                    <td className="p-3 font-mono text-[0.68rem] text-rvl-ink-2" colSpan={6}>
+                      {preview.counts.stats} stat rows will be imported on confirm. Game
+                      matching is listed on the Games tab.
+                    </td>
+                  </tr>
+                ) : null}
                 {filteredStats.slice(0, 500).map((stat, index) => (
                   <tr
                     key={`${stat.gameKey}-${stat.playerName}-${index}`}
