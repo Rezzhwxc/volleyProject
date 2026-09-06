@@ -8,17 +8,24 @@ import {
   playerCreateMany,
   playerCreateManyByTeamName,
   playerMerge,
+  optionalRegion,
   playerUpdate,
 } from "../schemas";
 
 export const playersRouter = router({
-  list: publicProcedure.query(({ ctx }) => players.list(ctx.db)),
+  list: publicProcedure
+    .input(optionalRegion)
+    .query(({ ctx, input }) => players.list(ctx.db, input?.region)),
 
   byId: publicProcedure.input(byId).query(({ ctx, input }) => players.getById(ctx.db, input.id)),
 
-  memberships: publicProcedure.query(({ ctx }) => players.listAllMemberships(ctx.db)),
+  memberships: publicProcedure
+    .input(optionalRegion)
+    .query(({ ctx, input }) => players.listAllMemberships(ctx.db, input?.region)),
 
-  count: publicProcedure.query(({ ctx }) => players.count(ctx.db)),
+  count: publicProcedure
+    .input(optionalRegion)
+    .query(({ ctx, input }) => players.count(ctx.db, input?.region)),
 
   create: adminProcedure.input(playerCreate).mutation(async ({ ctx, input }) => {
     const row = input.teamName

@@ -48,7 +48,11 @@ export default defineConfig({
       {
         plugins: [react()],
         resolve: {
-          alias: [{ find: /^next\/link$/, replacement: r("./tests/helpers/next-link-stub.tsx") }, ...alias],
+          alias: [
+            { find: /^next\/link$/, replacement: r("./tests/helpers/next-link-stub.tsx") },
+            { find: /^next\/navigation$/, replacement: r("./tests/helpers/next-navigation-stub.ts") },
+            ...alias,
+          ],
         },
         test: {
           name: "dom",

@@ -2,6 +2,7 @@ import { and, asc, desc, eq, isNull } from "drizzle-orm";
 import type { Db } from "@db";
 import { games, players, RECORD_METRICS, RECORD_TYPES, records, seasons } from "@db/schema";
 import { found, NotFoundError } from "./errors";
+import type { GameRegion } from "./games";
 import type { PartialInput } from "./input";
 
 export type RecordMetric = (typeof RECORD_METRICS)[number];
@@ -43,8 +44,13 @@ const base = (db: Db) =>
     .leftJoin(seasons, eq(records.seasonId, seasons.id))
     .leftJoin(games, eq(records.gameId, games.id));
 
-export async function list(db: Db) {
-  return base(db).orderBy(asc(records.metric), asc(records.minAttempts), asc(records.rank));
+export async function list(db: Db, region?: GameRegion) {
+  if (!region) {
+    return base(db).orderBy(asc(records.metric), asc(records.minAttempts), asc(records.rank));
+  }
+  return base(db)
+    .where(eq(games.region, region))
+    .orderBy(asc(records.metric), asc(records.minAttempts), asc(records.rank));
 }
 
 export async function listBySeason(db: Db, seasonId: number) {

@@ -3,10 +3,19 @@ import { homeNumbers, records } from "@server/services";
 import { enqueueRecalculation, latestJob } from "@server/queue";
 import { adminProcedure, publicProcedure, router } from "../init";
 import { revalidate } from "../revalidate";
-import { byId, recordCreate, recordRecalculate, recordUpdate, recordsByMetric } from "../schemas";
+import {
+  byId,
+  optionalRegion,
+  recordCreate,
+  recordRecalculate,
+  recordUpdate,
+  recordsByMetric,
+} from "../schemas";
 
 export const recordsRouter = router({
-  list: publicProcedure.query(({ ctx }) => records.list(ctx.db)),
+  list: publicProcedure
+    .input(optionalRegion)
+    .query(({ ctx, input }) => records.list(ctx.db, input?.region)),
 
   byMetric: publicProcedure
     .input(recordsByMetric)
