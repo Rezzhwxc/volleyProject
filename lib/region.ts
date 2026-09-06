@@ -5,6 +5,8 @@ export type MatchRegion = Exclude<SiteRegion, "all">;
 export const DEFAULT_SITE_REGION: SiteRegion = "na";
 export const SITE_REGION_COOKIE = "rvl-region";
 export const SITE_REGION_MAX_AGE = 60 * 60 * 24 * 365;
+/** Portal HTTP callers send this so the site region cookie does not hide other regions. */
+export const PORTAL_SKIP_REGION_HEADER = "x-rvl-skip-region";
 
 const REGION_SET = new Set<string>(SITE_REGIONS);
 
@@ -20,4 +22,15 @@ export function siteRegionCookie(region: SiteRegion) {
 
 export function regionQuery(region: SiteRegion): { region: MatchRegion } | Record<string, never> {
   return region === "all" ? {} : { region };
+}
+
+export function matchRegionOf(region: SiteRegion): MatchRegion | undefined {
+  return region === "all" ? undefined : region;
+}
+
+export function regionFromCookieHeader(header: string | null | undefined): MatchRegion | undefined {
+  if (!header) return matchRegionOf(parseSiteRegion(undefined));
+  const match = header.match(new RegExp(`(?:^|;\\s*)${SITE_REGION_COOKIE}=([^;]+)`));
+  const value = match?.[1] ? decodeURIComponent(match[1]) : undefined;
+  return matchRegionOf(parseSiteRegion(value));
 }

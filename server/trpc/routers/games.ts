@@ -1,7 +1,7 @@
 import { env } from "cloudflare:workers";
 import { TRPCError } from "@trpc/server";
 import { games } from "@server/services";
-import { adminProcedure, publicProcedure, router } from "../init";
+import { adminProcedure, publicProcedure, router, scopedRegion } from "../init";
 import { revalidate } from "../revalidate";
 import {
   byId,
@@ -19,17 +19,21 @@ const schedulePaths = ["/schedules", "/portal/games", "/"];
 export const gamesRouter = router({
   list: publicProcedure
     .input(optionalRegion)
-    .query(({ ctx, input }) => games.list(ctx.db, input?.region)),
+    .query(({ ctx, input }) => games.list(ctx.db, scopedRegion(ctx, input?.region))),
 
   listPlayed: publicProcedure
     .input(optionalRegion)
-    .query(({ ctx, input }) => games.listPlayed(ctx.db, input?.region)),
+    .query(({ ctx, input }) => games.listPlayed(ctx.db, scopedRegion(ctx, input?.region))),
 
   listSchedule: publicProcedure
     .input(optionalSeason)
-    .query(({ ctx, input }) => games.listSchedule(ctx.db, input.seasonId, input.region)),
+    .query(({ ctx, input }) =>
+      games.listSchedule(ctx.db, input.seasonId, scopedRegion(ctx, input.region)),
+    ),
 
-  byId: publicProcedure.input(byId).query(({ ctx, input }) => games.getById(ctx.db, input.id)),
+  byId: publicProcedure
+    .input(byId)
+    .query(({ ctx, input }) => games.getById(ctx.db, input.id, scopedRegion(ctx))),
 
   count: adminProcedure.query(({ ctx }) => games.count(ctx.db)),
 

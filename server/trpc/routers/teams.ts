@@ -1,7 +1,7 @@
 import { env } from "cloudflare:workers";
 import { TRPCError } from "@trpc/server";
 import { teams, sheetImport, type AssembledSources, type SheetImportPreview } from "@server/services";
-import { adminProcedure, protectedProcedure, publicProcedure, router } from "../init";
+import { adminProcedure, protectedProcedure, publicProcedure, router, scopedRegion } from "../init";
 import { revalidate } from "../revalidate";
 import {
   bySeason,
@@ -18,10 +18,10 @@ import { z } from "zod";
 export const teamsRouter = router({
   list: publicProcedure
     .input(optionalRegion)
-    .query(({ ctx, input }) => teams.list(ctx.db, input?.region)),
+    .query(({ ctx, input }) => teams.list(ctx.db, scopedRegion(ctx, input?.region))),
 
   byName: publicProcedure.input(byTeamName).query(async ({ ctx, input }) => {
-    const team = await teams.getByName(ctx.db, input.name);
+    const team = await teams.getByName(ctx.db, input.name, scopedRegion(ctx));
     if (!team) return null;
     const canEdit = await teams.canManageProfile(ctx.db, team.id, ctx.user);
     return { ...team, canEdit };
@@ -29,7 +29,9 @@ export const teamsRouter = router({
 
   playersBySeason: publicProcedure
     .input(bySeason)
-    .query(({ ctx, input }) => teams.listPlayersBySeason(ctx.db, input.seasonId, input.region)),
+    .query(({ ctx, input }) =>
+      teams.listPlayersBySeason(ctx.db, input.seasonId, scopedRegion(ctx, input.region)),
+    ),
 
   count: adminProcedure.query(({ ctx }) => teams.count(ctx.db)),
 

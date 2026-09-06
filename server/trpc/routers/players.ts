@@ -1,5 +1,5 @@
 import { players } from "@server/services";
-import { adminProcedure, publicProcedure, router } from "../init";
+import { adminProcedure, publicProcedure, router, scopedRegion } from "../init";
 import { revalidate } from "../revalidate";
 import {
   byId,
@@ -15,17 +15,19 @@ import {
 export const playersRouter = router({
   list: publicProcedure
     .input(optionalRegion)
-    .query(({ ctx, input }) => players.list(ctx.db, input?.region)),
+    .query(({ ctx, input }) => players.list(ctx.db, scopedRegion(ctx, input?.region))),
 
-  byId: publicProcedure.input(byId).query(({ ctx, input }) => players.getById(ctx.db, input.id)),
+  byId: publicProcedure
+    .input(byId)
+    .query(({ ctx, input }) => players.getById(ctx.db, input.id, scopedRegion(ctx))),
 
   memberships: publicProcedure
     .input(optionalRegion)
-    .query(({ ctx, input }) => players.listAllMemberships(ctx.db, input?.region)),
+    .query(({ ctx, input }) => players.listAllMemberships(ctx.db, scopedRegion(ctx, input?.region))),
 
   count: publicProcedure
     .input(optionalRegion)
-    .query(({ ctx, input }) => players.count(ctx.db, input?.region)),
+    .query(({ ctx, input }) => players.count(ctx.db, scopedRegion(ctx, input?.region))),
 
   create: adminProcedure.input(playerCreate).mutation(async ({ ctx, input }) => {
     const row = input.teamName

@@ -2,6 +2,7 @@ import { initTRPC, TRPCError } from "@trpc/server";
 import superjson from "superjson";
 import { ZodError } from "zod";
 import type { Db } from "@db";
+import type { MatchRegion } from "@/lib/region";
 import { ServiceError } from "../services/errors";
 import { isAdmin } from "../services/users";
 
@@ -15,6 +16,12 @@ export interface TrpcUser {
 export interface Context {
   db: Db;
   user: TrpcUser | null;
+  /** Set on public site requests. Undefined means ALL, or a portal/admin caller. */
+  region?: MatchRegion | undefined;
+}
+
+export function scopedRegion(ctx: Context, explicit?: MatchRegion | undefined): MatchRegion | undefined {
+  return explicit ?? ctx.region;
 }
 
 const t = initTRPC.context<Context>().create({

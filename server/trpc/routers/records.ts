@@ -1,7 +1,7 @@
 import { env } from "cloudflare:workers";
 import { homeNumbers, records } from "@server/services";
 import { enqueueRecalculation, latestJob } from "@server/queue";
-import { adminProcedure, publicProcedure, router } from "../init";
+import { adminProcedure, publicProcedure, router, scopedRegion } from "../init";
 import { revalidate } from "../revalidate";
 import {
   byId,
@@ -15,12 +15,18 @@ import {
 export const recordsRouter = router({
   list: publicProcedure
     .input(optionalRegion)
-    .query(({ ctx, input }) => records.list(ctx.db, input?.region)),
+    .query(({ ctx, input }) => records.list(ctx.db, scopedRegion(ctx, input?.region))),
 
   byMetric: publicProcedure
     .input(recordsByMetric)
     .query(({ ctx, input }) =>
-      records.listByMetric(ctx.db, input.metric, input.minAttempts, input.type),
+      records.listByMetric(
+        ctx.db,
+        input.metric,
+        input.minAttempts,
+        input.type,
+        scopedRegion(ctx, input.region),
+      ),
     ),
 
   count: adminProcedure.query(({ ctx }) => records.count(ctx.db)),

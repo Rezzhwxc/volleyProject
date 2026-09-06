@@ -1,5 +1,5 @@
 import { homeNumbers, stats } from "@server/services";
-import { adminProcedure, publicProcedure, router } from "../init";
+import { adminProcedure, publicProcedure, router, scopedRegion } from "../init";
 import { revalidate } from "../revalidate";
 import {
   byId,
@@ -20,13 +20,13 @@ export const statsRouter = router({
       stats.leaderboard(ctx.db, {
         seasonId: input.seasonId,
         stageRound: input.stageRound,
-        region: input.region,
+        region: scopedRegion(ctx, input.region),
       }),
     ),
 
   vectorGraph: publicProcedure
     .input(optionalRegion)
-    .query(({ ctx, input }) => stats.vectorGraph(ctx.db, input?.region)),
+    .query(({ ctx, input }) => stats.vectorGraph(ctx.db, scopedRegion(ctx, input?.region))),
 
   count: adminProcedure.query(({ ctx }) => stats.count(ctx.db)),
 

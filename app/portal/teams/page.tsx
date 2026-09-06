@@ -1,4 +1,4 @@
-import { api } from "@server/trpc/server";
+import { portalApi } from "@server/trpc/server";
 import { PortalPage } from "@components/portal/portal-page";
 import { TeamsManager } from "@components/portal/teams-manager";
 
@@ -7,7 +7,7 @@ export const dynamic = "force-dynamic";
 export const metadata = { title: "Teams · Portal" };
 
 export default async function PortalTeamsPage() {
-  const trpc = await api();
+  const trpc = await portalApi();
   const [rows, seasonList] = await Promise.all([trpc.teams.list(), trpc.seasons.list()]);
 
   return (

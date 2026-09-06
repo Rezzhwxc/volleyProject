@@ -67,6 +67,7 @@ export async function listByMetric(
   metric: RecordMetric,
   minAttempts?: number | null,
   type?: RecordType | null,
+  region?: GameRegion,
 ) {
   return base(db)
     .where(
@@ -76,6 +77,7 @@ export async function listByMetric(
           ? isNull(records.minAttempts)
           : eq(records.minAttempts, minAttempts),
         ...(type ? [eq(records.type, type)] : []),
+        region ? eq(games.region, region) : undefined,
       ),
     )
     .orderBy(desc(records.value), asc(records.rank));
