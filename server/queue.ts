@@ -1,6 +1,7 @@
 import { eq } from "drizzle-orm";
 import { makeDb, type Db } from "@db";
 import { jobRuns } from "@db/schema";
+import { explainError, logError } from "./report";
 import { recalculateRecords } from "./records-recalculation";
 import { invalidateHomeNumbers } from "./services/home-numbers";
 
@@ -54,12 +55,14 @@ export async function runRecordsJob(db: Db, message: RecordsJobMessage): Promise
       .set({ status: "succeeded", finishedAt: new Date(), rowsWritten })
       .where(eq(jobRuns.id, message.jobId));
   } catch (error) {
+    const explained = explainError(error);
+    logError("queue.records", error, { jobId: message.jobId, seasonId: message.seasonId });
     await db
       .update(jobRuns)
       .set({
         status: "failed",
         finishedAt: new Date(),
-        error: error instanceof Error ? error.message : String(error),
+        error: explained.message,
       })
       .where(eq(jobRuns.id, message.jobId));
     throw error;
@@ -76,7 +79,8 @@ export async function handleRecordsBatch(
     try {
       await runRecordsJob(db, message.body);
       message.ack();
-    } catch {
+    } catch (error) {
+      logError("queue.records.retry", error, { jobId: message.body.jobId });
       message.retry();
     }
   }
