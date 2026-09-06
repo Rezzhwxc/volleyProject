@@ -4,7 +4,7 @@ import { useEffect } from "react";
 import { ErrorScreen } from "@components/error-screen";
 import { errorDetail, presentUnknownError } from "@/lib/error-presentation";
 
-export default function AppError({
+export default function PortalError({
   error,
   reset,
 }: {
@@ -18,7 +18,7 @@ export default function AppError({
     console.error(
       JSON.stringify({
         level: "error",
-        scope: "app.error",
+        scope: "app.portal.error",
         kind: presentation.kind,
         message: presentation.summary,
         detail,
@@ -33,7 +33,6 @@ export default function AppError({
       detail={detail}
       digest={error.digest ?? null}
       onRetry={() => reset()}
-      fullPage
     />
   );
 }
