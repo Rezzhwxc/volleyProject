@@ -10,6 +10,17 @@ import { PORTAL_SKIP_REGION_HEADER } from "@/lib/region";
 
 export const trpc = createTRPCReact<AppRouter>();
 
+async function trpcFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+  const response = await fetch(input, init);
+  const contentType = response.headers.get("content-type") ?? "";
+  if (contentType.includes("json")) return response;
+
+  const snippet = (await response.clone().text()).replace(/\s+/g, " ").trim().slice(0, 180);
+  throw new Error(
+    `Expected JSON from the API, got ${response.status} ${contentType || "unknown type"}: ${snippet}`,
+  );
+}
+
 export function TrpcProvider({ children }: { children: ReactNode }) {
   const [queryClient] = useState(() => new QueryClient());
   const [client] = useState(() =>
@@ -18,6 +29,7 @@ export function TrpcProvider({ children }: { children: ReactNode }) {
         httpBatchLink({
           url: "/api/trpc",
           transformer: superjson,
+          fetch: trpcFetch,
           headers() {
             if (typeof window !== "undefined" && window.location.pathname.startsWith("/portal")) {
               return { [PORTAL_SKIP_REGION_HEADER]: "1" };

@@ -14,6 +14,7 @@ import type { TeamLeadershipRole } from "@db/schema";
 import { BadRequestError, NotFoundError } from "../errors";
 import type { RecordsJobMessage } from "../../queue";
 import { assembleSheetImportPreview, buildSheetImportPreview, assertPreviewCommitable } from "./preview";
+import { deleteSheetImportSession, requireSheetImportSession } from "./session";
 import type { FetchImpl } from "./fetch";
 import { importKeyFromStoredGame } from "./keys";
 import { normalizeName } from "./names";
@@ -392,7 +393,13 @@ export async function commitSheetImport(
     ? applyPreviewExcludes(input.preview, input)
     : input.sources
       ? await assembleSheetImportPreview(db, input, input.sources)
-      : await buildSheetImportPreview(db, input, options.fetchImpl ?? fetch);
+      : input.sessionId
+        ? await assembleSheetImportPreview(
+            db,
+            input,
+            await requireSheetImportSession(input.sessionId),
+          )
+        : await buildSheetImportPreview(db, input, options.fetchImpl ?? fetch);
   assertPreviewCommitable(preview);
 
   const includePlayers =
@@ -546,6 +553,10 @@ export async function commitSheetImport(
       seasonId,
       requestedBy: options.requestedBy ?? null,
     });
+  }
+
+  if (input.sessionId) {
+    await deleteSheetImportSession(input.sessionId);
   }
 
   return {

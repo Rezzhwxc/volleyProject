@@ -94,6 +94,13 @@ export const trpcManifest: TrpcManifestEntry[] = [
     status: "done",
     rationale: "merges staged sheet payloads into the import preview",
   },
+  {
+    endpoint: "POST /api/sheet-import/start-session",
+    procedure: "sheetImport.startSession",
+    access: "admin",
+    status: "done",
+    rationale: "opens a server-side import session so later steps do not POST the full workbook",
+  },
 
   { endpoint: "POST /api/stats", procedure: "stats.create", access: "admin", status: "done" },
   { endpoint: "PATCH /api/stats/:id", procedure: "stats.update", access: "admin", status: "done" },

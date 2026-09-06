@@ -88,6 +88,7 @@ export const teamsRouter = router({
         seasonId: input.seasonId,
         masterUrl: input.masterUrl,
         regionalUrls: input.regionalUrls,
+        sessionId: input.sessionId,
         sources: input.sources as AssembledSources | undefined,
         preview: input.preview as SheetImportPreview | undefined,
         excludeTeamKeys: input.excludeTeamKeys,

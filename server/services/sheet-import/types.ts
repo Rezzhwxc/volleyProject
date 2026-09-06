@@ -150,6 +150,7 @@ export interface SheetImportInput {
   masterUrl?: string | undefined;
   regionalUrls?: RegionalUrls | undefined;
   sources?: AssembledSources | undefined;
+  sessionId?: string | undefined;
   seasonNumber?: number | undefined;
   seasonId?: number | undefined;
   startDate?: string | undefined;

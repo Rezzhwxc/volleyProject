@@ -326,6 +326,12 @@ export async function assembleSheetImportPreview(
   };
 }
 
+/** Drop stat rows from the preview JSON. S2-sized seasons overflow the Worker HTML error page. */
+export function toClientPreview(preview: SheetImportPreview): SheetImportPreview {
+  if (preview.stats.length === 0) return preview;
+  return { ...preview, stats: [] };
+}
+
 export async function buildSheetImportPreview(
   db: Db,
   input: SheetImportInput,
