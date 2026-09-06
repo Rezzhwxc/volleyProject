@@ -3,6 +3,7 @@ import {
   avatarByUserId,
   avatarByUsername,
   avatarFor,
+  avatarHeadshotByUsername,
   numericRobloxUserId,
 } from "@server/services/roblox";
 
@@ -62,6 +63,22 @@ describe("avatarByUsername", () => {
   it("returns null when the username is not a Roblox user", async () => {
     const fetchImpl = vi.fn(async () => jsonResponse({ data: [] }));
     await expect(avatarByUsername("not-a-real-user-zzz", fetchImpl as typeof fetch)).resolves.toBeNull();
+  });
+
+  it("resolves the headshot thumbnail URL", async () => {
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/v1/usernames/users")) {
+        return jsonResponse({ data: [{ id: 1 }] });
+      }
+      expect(url).toContain("/v1/users/avatar-headshot?userIds=1");
+      expect(url).toContain("size=150x150");
+      return jsonResponse({ data: [{ imageUrl: "tr.rbxcdn.com/headshot.png", state: "Completed" }] });
+    });
+
+    await expect(avatarHeadshotByUsername("Roblox", fetchImpl as typeof fetch)).resolves.toBe(
+      "https://tr.rbxcdn.com/headshot.png",
+    );
   });
 });
 

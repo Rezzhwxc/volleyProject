@@ -195,7 +195,7 @@ export default async function HomePage() {
                   <img
                     src={avatars[entry.name] ?? "/images/pfpLogo.png"}
                     alt=""
-                    className="size-16 shrink-0 rounded-xs border border-rvl-line object-cover object-top"
+                    className="size-16 shrink-0 rounded-xs border border-rvl-line object-cover object-center"
                   />
                   <div className="font-mono text-[2.9rem] font-bold leading-none tracking-[-0.045em] tabular-nums text-rvl-accent">
                     {entry.value}
