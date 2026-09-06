@@ -49,13 +49,12 @@ const withSeason = {
   gameCount: correlatedCount("teams_games", "team_id", "teams", "id"),
 };
 
-async function teamIdsInRegion(db: Db, region: GameRegion) {
-  const rows = await db
-    .select({ teamId: teamsGames.teamId })
-    .from(teamsGames)
-    .innerJoin(games, eq(teamsGames.gameId, games.id))
-    .where(eq(games.region, region));
-  return [...new Set(rows.map((row) => row.teamId))];
+function teamInRegion(region: GameRegion) {
+  return sql`${teams.id} in (
+    select distinct ${teamsGames.teamId} from ${teamsGames}
+    inner join ${games} on ${teamsGames.gameId} = ${games.id}
+    where ${games.region} = ${region}
+  )`;
 }
 
 export async function list(db: Db, region?: GameRegion) {
@@ -66,9 +65,7 @@ export async function list(db: Db, region?: GameRegion) {
 
   if (!region) return query.orderBy(asc(teams.name));
 
-  const ids = await teamIdsInRegion(db, region);
-  if (ids.length === 0) return [];
-  return query.where(inArray(teams.id, ids)).orderBy(asc(teams.name));
+  return query.where(teamInRegion(region)).orderBy(asc(teams.name));
 }
 
 export async function listBySeason(db: Db, seasonId: number) {
@@ -80,22 +77,22 @@ export async function listBySeason(db: Db, seasonId: number) {
     .orderBy(asc(teams.name));
 }
 
-export async function getById(db: Db, id: number) {
+export async function getById(db: Db, id: number, region?: GameRegion) {
   const team = await db.query.teams.findFirst({ where: eq(teams.id, id) });
   if (!team) return null;
-  return hydrate(db, team);
+  return hydrate(db, team, region);
 }
 
-export async function getByName(db: Db, name: string) {
+export async function getByName(db: Db, name: string, region?: GameRegion) {
   const team = await db.query.teams.findFirst({ where: eq(teams.name, name) });
   if (!team) return null;
-  return hydrate(db, team);
+  return hydrate(db, team, region);
 }
 
-async function hydrate(db: Db, team: typeof teams.$inferSelect) {
+async function hydrate(db: Db, team: typeof teams.$inferSelect, region?: GameRegion) {
   const [roster, schedule, season] = await Promise.all([
     listPlayers(db, team.id),
-    listGames(db, team.id),
+    listGames(db, team.id, region),
     team.seasonId
       ? db.query.seasons.findFirst({ where: eq(seasons.id, team.seasonId) })
       : Promise.resolve(undefined),
@@ -129,9 +126,7 @@ export async function listPlayers(db: Db, teamId: number) {
 export async function listPlayersBySeason(db: Db, seasonId: number, region?: GameRegion) {
   const filters = [eq(teams.seasonId, seasonId)];
   if (region) {
-    const ids = await teamIdsInRegion(db, region);
-    if (ids.length === 0) return [];
-    filters.push(inArray(teams.id, ids));
+    filters.push(teamInRegion(region));
   }
 
   const rows = await db
@@ -155,7 +150,7 @@ export async function listPlayersByTeamName(db: Db, name: string) {
   return listPlayers(db, team.id);
 }
 
-export async function listGames(db: Db, teamId: number) {
+export async function listGames(db: Db, teamId: number, region?: GameRegion) {
   return db
     .select({
       id: games.id,
@@ -168,7 +163,7 @@ export async function listGames(db: Db, teamId: number) {
     })
     .from(teamsGames)
     .innerJoin(games, eq(teamsGames.gameId, games.id))
-    .where(eq(teamsGames.teamId, teamId))
+    .where(and(eq(teamsGames.teamId, teamId), region ? eq(games.region, region) : undefined))
     .orderBy(asc(games.date));
 }
 
