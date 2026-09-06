@@ -191,17 +191,17 @@ export default async function HomePage() {
                 className="block text-inherit no-underline"
               >
                 <div className={label}>{entry.metric}</div>
-                <div className="my-3 flex items-end gap-4">
+                <div className="my-4 flex items-end gap-5">
                   <img
                     src={avatars[entry.name] ?? "/images/pfpLogo.png"}
                     alt=""
-                    className="size-16 shrink-0 rounded-xs border border-rvl-line object-cover object-center"
+                    className="size-24 shrink-0 rounded-xs border border-rvl-line object-cover object-center sm:size-28"
                   />
-                  <div className="font-mono text-[2.9rem] font-bold leading-none tracking-[-0.045em] tabular-nums text-rvl-accent">
+                  <div className="font-mono text-[3.8rem] font-bold leading-none tracking-[-0.05em] tabular-nums text-rvl-accent sm:text-[4.6rem]">
                     {entry.value}
                   </div>
                 </div>
-                <div className="text-[1.02rem] font-semibold">{entry.name}</div>
+                <div className="text-[1.15rem] font-semibold">{entry.name}</div>
                 <div className="mt-1 font-mono text-[0.62rem] uppercase tracking-[0.12em] text-rvl-dim">
                   {entry.context}
                 </div>
