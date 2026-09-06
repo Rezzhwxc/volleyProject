@@ -106,10 +106,67 @@ export const sheetImportSources = z.object({
   sourceWarnings: z.array(z.string()),
 });
 
+const previewTeam = z.object({
+  key: z.string(),
+  name: z.string(),
+  region: z.enum(["na", "eu", "as"]).nullable(),
+  playerNames: z.array(z.string()),
+  leadership: z
+    .object({
+      C: z.string().optional(),
+      VC: z.string().optional(),
+      CC: z.string().optional(),
+    })
+    .optional(),
+  included: z.boolean(),
+});
+
+const previewGame = parsedGame.extend({
+  matchedStatCount: z.number(),
+  included: z.boolean(),
+});
+
+const previewStat = z.object({
+  gameKey: z.string(),
+  teamName: z.string(),
+  playerName: z.string(),
+  counts: sheetStatCounts,
+});
+
+/** Staged preview from assemblePreview — commit uses this instead of re-parsing sources. */
+export const sheetImportPreviewSnapshot = z.object({
+  mode: z.enum(["full", "teams", "teams_and_players", "players"]),
+  seasonNumber: z.number().nullable(),
+  seasonId: z.number().nullable(),
+  counts: z.object({
+    teams: z.number(),
+    players: z.number(),
+    playersNew: z.number(),
+    playersExisting: z.number(),
+    games: z.number(),
+    stats: z.number(),
+    warnings: z.number(),
+    errors: z.number(),
+  }),
+  teams: z.array(previewTeam),
+  players: z.array(
+    z.object({
+      name: z.string(),
+      teamName: z.string(),
+      exists: z.boolean(),
+    }),
+  ),
+  games: z.array(previewGame),
+  stats: z.array(previewStat),
+  warnings: z.array(z.string()),
+  errors: z.array(z.string()),
+});
+
 const sheetImportExcludes = {
   excludeTeamKeys: z.array(z.string()).optional(),
   excludeGameKeys: z.array(z.string()).optional(),
   sources: sheetImportSources.optional(),
+  preview: sheetImportPreviewSnapshot.optional(),
 };
 
 const sheetImportFullShape = {
@@ -132,10 +189,10 @@ const sheetImportTeamsShape = {
 } as const;
 
 export const sheetImportFull = z.object(sheetImportFullShape).superRefine((data, ctx) => {
-  if (!data.sources && !data.masterUrl) {
+  if (!data.preview && !data.sources && !data.masterUrl) {
     ctx.addIssue({
       code: "custom",
-      message: "Provide staged sources from preview or a master sheet URL",
+      message: "Provide staged preview, sources from preview, or a master sheet URL",
       path: ["masterUrl"],
     });
   }
@@ -143,6 +200,7 @@ export const sheetImportFull = z.object(sheetImportFullShape).superRefine((data,
 
 export const sheetImportTeams = z.object(sheetImportTeamsShape).superRefine((data, ctx) => {
   if (
+    !data.preview &&
     !data.sources &&
     !data.masterUrl &&
     !data.regionalUrls?.na &&
@@ -151,7 +209,7 @@ export const sheetImportTeams = z.object(sheetImportTeamsShape).superRefine((dat
   ) {
     ctx.addIssue({
       code: "custom",
-      message: "Provide staged sources from preview or at least one sheet URL",
+      message: "Provide staged preview, sources from preview, or at least one sheet URL",
       path: ["sources"],
     });
   }
@@ -357,15 +415,30 @@ export const triviaSubject = z.object({
   seed: z.number().min(0).max(1),
 });
 
-export const bySeason = z.object({ seasonId: id });
+export const regionValue = z.enum(MATCH_REGIONS).optional();
+
+export const optionalRegion = z
+  .object({
+    region: regionValue,
+  })
+  .optional();
+
+export const bySeason = z.object({
+  seasonId: id,
+  region: regionValue,
+});
 export const byTeamName = z.object({ name: z.string().min(1) });
-export const optionalSeason = z.object({ seasonId: id.optional() });
+export const optionalSeason = z.object({
+  seasonId: id.optional(),
+  region: regionValue,
+});
 
 export const STAGE_ROUNDS = ["R1", "R2", "R3", "R4", "R5", "R6", "all"] as const;
 
 export const leaderboardInput = z.object({
   seasonId: id.optional(),
   stageRound: z.enum(STAGE_ROUNDS).optional(),
+  region: regionValue,
 });
 export const recordsByMetric = z.object({
   metric: z.enum(RECORD_METRICS),

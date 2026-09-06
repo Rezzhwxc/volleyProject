@@ -9,12 +9,15 @@ import {
   teamCreate,
   teamUpdate,
   teamProfileUpdate,
+  optionalRegion,
   sheetImportTeams,
 } from "../schemas";
 import { z } from "zod";
 
 export const teamsRouter = router({
-  list: publicProcedure.query(({ ctx }) => teams.list(ctx.db)),
+  list: publicProcedure
+    .input(optionalRegion)
+    .query(({ ctx, input }) => teams.list(ctx.db, input?.region)),
 
   byName: publicProcedure.input(byTeamName).query(async ({ ctx, input }) => {
     const team = await teams.getByName(ctx.db, input.name);
@@ -25,7 +28,7 @@ export const teamsRouter = router({
 
   playersBySeason: publicProcedure
     .input(bySeason)
-    .query(({ ctx, input }) => teams.listPlayersBySeason(ctx.db, input.seasonId)),
+    .query(({ ctx, input }) => teams.listPlayersBySeason(ctx.db, input.seasonId, input.region)),
 
   count: adminProcedure.query(({ ctx }) => teams.count(ctx.db)),
 
@@ -81,6 +84,7 @@ export const teamsRouter = router({
       masterUrl: input.masterUrl,
       regionalUrls: input.regionalUrls,
       sources: input.sources as AssembledSources | undefined,
+      preview: input.preview,
       excludeTeamKeys: input.excludeTeamKeys,
       excludeGameKeys: input.excludeGameKeys,
     });

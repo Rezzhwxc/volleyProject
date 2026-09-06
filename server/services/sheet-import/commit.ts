@@ -8,7 +8,7 @@ import { assembleSheetImportPreview, buildSheetImportPreview, assertPreviewCommi
 import type { FetchImpl } from "./fetch";
 import { importKeyFromStoredGame } from "./keys";
 import { normalizeName } from "./names";
-import type { SheetImportCommitResult, SheetImportInput } from "./types";
+import type { SheetImportCommitResult, SheetImportInput, SheetImportPreview } from "./types";
 import type { SheetRegion } from "./types";
 
 interface StoredGameTeams {
@@ -76,13 +76,55 @@ async function loadExistingGameIdByKey(db: Db, seasonId: number): Promise<Map<st
   return byKey;
 }
 
-async function getOrCreatePlayer(db: Db, name: string): Promise<{ id: number; created: boolean }> {
-  const lowered = name.toLowerCase();
-  const existing = await db.query.players.findFirst({ where: eq(players.name, lowered) });
-  if (existing) return { id: existing.id, created: false };
-  const [created] = await db.insert(players).values({ name: lowered, position: "N/A" }).returning();
-  if (!created) throw new BadRequestError(`Could not create player "${name}"`);
-  return { id: created.id, created: true };
+async function resolvePlayerIds(
+  db: Db,
+  names: string[],
+): Promise<{ ids: Map<string, number>; created: number }> {
+  const lowered = [...new Set(names.map((name) => name.toLowerCase()))];
+  const ids = new Map<string, number>();
+  if (lowered.length === 0) return { ids, created: 0 };
+
+  for (const chunk of chunkValues(lowered)) {
+    const rows = await db.select().from(players).where(inArray(players.name, chunk));
+    for (const row of rows) ids.set(row.name, row.id);
+  }
+
+  const missing = lowered.filter((name) => !ids.has(name));
+  if (missing.length > 0) {
+    await insertManyIgnore(
+      db,
+      players,
+      missing.map((name) => ({ name, position: "N/A" as const })),
+    );
+    for (const chunk of chunkValues(missing)) {
+      const rows = await db.select().from(players).where(inArray(players.name, chunk));
+      for (const row of rows) ids.set(row.name, row.id);
+    }
+  }
+
+  return { ids, created: missing.length };
+}
+
+function applyPreviewExcludes(
+  preview: SheetImportPreview,
+  input: SheetImportInput,
+): SheetImportPreview {
+  const excludeTeams = new Set(input.excludeTeamKeys?.map((key) => key.toLowerCase()) ?? []);
+  const excludeGames = new Set(input.excludeGameKeys?.map((key) => key.toLowerCase()) ?? []);
+  if (excludeTeams.size === 0 && excludeGames.size === 0) return preview;
+
+  const teams = preview.teams.map((team) => ({
+    ...team,
+    included: team.included && !excludeTeams.has(team.key.toLowerCase()),
+  }));
+  const games = preview.games.map((game) => ({
+    ...game,
+    included: game.included && !excludeGames.has(game.key.toLowerCase()),
+  }));
+  const activeGameKeys = new Set(games.filter((game) => game.included).map((game) => game.key));
+  const stats = preview.stats.filter((stat) => activeGameKeys.has(stat.gameKey));
+
+  return { ...preview, teams, games, stats };
 }
 
 export async function commitSheetImport(
@@ -95,9 +137,11 @@ export async function commitSheetImport(
     d1?: D1Database;
   } = {},
 ): Promise<SheetImportCommitResult> {
-  const preview = input.sources
-    ? await assembleSheetImportPreview(db, input, input.sources)
-    : await buildSheetImportPreview(db, input, options.fetchImpl ?? fetch);
+  const preview = input.preview
+    ? applyPreviewExcludes(input.preview, input)
+    : input.sources
+      ? await assembleSheetImportPreview(db, input, input.sources)
+      : await buildSheetImportPreview(db, input, options.fetchImpl ?? fetch);
   assertPreviewCommitable(preview);
 
   const includePlayers =
@@ -160,20 +204,47 @@ export async function commitSheetImport(
   const activeTeams = preview.teams.filter((team) => team.included);
 
   if (includeTeams) {
-    for (const team of activeTeams) {
-      const key = normalizeName(team.name);
-      if (teamIdByName.has(key)) continue;
-      const [created] = await db
-        .insert(teams)
-        .values({ name: team.name, seasonId, placement: "Didnt make playoffs" })
-        .returning();
-      if (!created) throw new BadRequestError(`Could not create team "${team.name}"`);
-      teamIdByName.set(key, created.id);
-      teamsCreated += 1;
+    const missingTeams = activeTeams.filter((team) => !teamIdByName.has(normalizeName(team.name)));
+    if (missingTeams.length > 0) {
+      await insertManyIgnore(
+        db,
+        teams,
+        missingTeams.map((team) => ({
+          name: team.name,
+          seasonId,
+          placement: "Didnt make playoffs",
+        })),
+      );
+      teamsCreated = missingTeams.length;
+      for (const chunk of chunkValues(missingTeams.map((team) => team.name))) {
+        const rows = await db
+          .select()
+          .from(teams)
+          .where(and(eq(teams.seasonId, seasonId), inArray(teams.name, chunk)));
+        for (const row of rows) teamIdByName.set(normalizeName(row.name), row.id);
+      }
     }
   }
 
   if (includePlayers) {
+    const allPlayerNames = activeTeams.flatMap((team) => {
+      const names = [...team.playerNames];
+      if (team.leadership) {
+        for (const role of ["C", "VC", "CC"] as const) {
+          const captain = team.leadership[role];
+          if (captain && !names.some((name) => normalizeName(name) === normalizeName(captain))) {
+            names.unshift(captain);
+          }
+        }
+      }
+      return names;
+    });
+    const { ids: playerIdsByName, created: bulkPlayersCreated } = await resolvePlayerIds(
+      db,
+      allPlayerNames,
+    );
+    playersCreated += bulkPlayersCreated;
+
     for (const team of activeTeams) {
       const teamId = teamIdByName.get(normalizeName(team.name));
       if (!teamId) {
@@ -190,18 +261,24 @@ export async function commitSheetImport(
           const captain = team.leadership[role];
           if (!captain) continue;
           roleByPlayer.set(normalizeName(captain), role);
-          // Captains must land on the roster even if a regional tab omitted them.
-          if (!team.playerNames.some((name) => normalizeName(name) === normalizeName(captain))) {
-            team.playerNames.unshift(captain);
-          }
         }
       }
 
       const rosterLinks: { teamId: number; playerId: number }[] = [];
       for (const playerName of team.playerNames) {
-        const { id: playerId, created } = await getOrCreatePlayer(db, playerName);
-        if (created) playersCreated += 1;
+        const playerId = playerIdsByName.get(playerName.toLowerCase());
+        if (!playerId) {
+          throw new BadRequestError(`Could not resolve player "${playerName}"`);
+        }
         rosterLinks.push({ teamId, playerId });
+      }
+      if (team.leadership) {
+        for (const role of ["C", "VC", "CC"] as const) {
+          const captain = team.leadership[role];
+          if (!captain) continue;
+          const playerId = playerIdsByName.get(captain.toLowerCase());
+          if (playerId) rosterLinks.push({ teamId, playerId });
+        }
       }
       await insertManyIgnore(db, teamsPlayers, rosterLinks);
       playersAttached += rosterLinks.length;
@@ -297,34 +374,26 @@ export async function commitSheetImport(
   }
 
   if (includeStats) {
-    const playerCache = new Map<string, number>();
-    const allNames = [...new Set(preview.stats.map((row) => row.playerName.toLowerCase()))];
-    if (allNames.length > 0) {
-      for (const chunk of chunkValues(allNames)) {
-        const rows = await db.select().from(players).where(inArray(players.name, chunk));
-        for (const row of rows) playerCache.set(row.name, row.id);
-      }
-    }
+    const statPlayerNames = preview.stats.map((row) => row.playerName);
+    const { ids: playerCache, created: statPlayersCreated } = await resolvePlayerIds(
+      db,
+      statPlayerNames,
+    );
+    playersCreated += statPlayersCreated;
 
     const statRows: StatInsertRow[] = [];
     const seenStatKeys = new Set<string>();
+    const rosterLinks: { teamId: number; playerId: number }[] = [];
 
     for (const row of preview.stats) {
       const gameId = gameIdByKey.get(row.gameKey);
       if (!gameId) continue;
 
-      let playerId = playerCache.get(row.playerName.toLowerCase());
-      if (!playerId) {
-        const created = await getOrCreatePlayer(db, row.playerName);
-        playerId = created.id;
-        playerCache.set(row.playerName.toLowerCase(), playerId);
-        if (created.created) playersCreated += 1;
+      const playerId = playerCache.get(row.playerName.toLowerCase());
+      if (!playerId) continue;
 
-        const teamId = teamIdByName.get(normalizeName(row.teamName));
-        if (teamId) {
-          await db.insert(teamsPlayers).values({ teamId, playerId }).onConflictDoNothing();
-        }
-      }
+      const teamId = teamIdByName.get(normalizeName(row.teamName));
+      if (teamId) rosterLinks.push({ teamId, playerId });
 
       const statKey = `${playerId}:${gameId}`;
       if (seenStatKeys.has(statKey)) continue;
@@ -335,6 +404,10 @@ export async function commitSheetImport(
         gameId,
         ...row.counts,
       });
+    }
+
+    if (rosterLinks.length > 0) {
+      await insertManyIgnore(db, teamsPlayers, rosterLinks);
     }
 
     if (statRows.length > 0) {
