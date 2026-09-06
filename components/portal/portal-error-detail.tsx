@@ -10,7 +10,7 @@ import {
   type ReactNode,
 } from "react";
 import { toast } from "sonner";
-import { formatUnknownError } from "@/lib/format-error";
+import { formatErrorTitle, formatUnknownError } from "@/lib/format-error";
 import { Button } from "@components/ui/button";
 import {
   Dialog,
@@ -53,7 +53,7 @@ export function PortalErrorDetailProvider({ children }: { children: ReactNode })
 
   const showErrorDetail = useCallback(
     (title: string, error: unknown) => {
-      openDetail(title, formatError(error));
+      openDetail(formatErrorTitle(error) || title, formatError(error));
     },
     [openDetail],
   );
@@ -61,11 +61,12 @@ export function PortalErrorDetailProvider({ children }: { children: ReactNode })
   const showErrorToast = useCallback(
     (title: string, error: unknown) => {
       const message = formatError(error);
+      const toastTitle = formatErrorTitle(error) || title;
       toast.custom(
         (id) => {
           const open = () => {
             toast.dismiss(id);
-            openDetail(title, message);
+            openDetail(toastTitle, message);
           };
           const dismiss = (event: MouseEvent) => {
             event.stopPropagation();
@@ -80,7 +81,7 @@ export function PortalErrorDetailProvider({ children }: { children: ReactNode })
               >
                 <OctagonXIcon className="mt-0.5 size-4 shrink-0 text-destructive" />
                 <div className="min-w-0 flex-1 space-y-1">
-                  <p className="text-sm font-medium">{title}</p>
+                  <p className="text-sm font-medium">{toastTitle}</p>
                   <p className="text-xs text-rvl-ink-2">
                     {preview(message)} · Click for full details
                   </p>

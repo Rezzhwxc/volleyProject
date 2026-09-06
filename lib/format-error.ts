@@ -1,3 +1,5 @@
+import { presentUnknownError } from "@/lib/error-presentation";
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
@@ -10,9 +12,9 @@ function trpcCause(error: unknown): string | null {
 }
 
 export function formatUnknownError(error: unknown): string {
+  const presentation = presentUnknownError(error);
   const cause = trpcCause(error);
-  const message = error instanceof Error ? error.message : typeof error === "string" ? error : null;
-  const parts = [message, cause].filter((part, index, all): part is string => {
+  const parts = [presentation.summary, cause].filter((part, index, all): part is string => {
     return Boolean(part) && all.indexOf(part) === index;
   });
   if (parts.length > 0) return parts.join("\n\n");
@@ -22,4 +24,8 @@ export function formatUnknownError(error: unknown): string {
   } catch {
     return String(error);
   }
+}
+
+export function formatErrorTitle(error: unknown): string {
+  return presentUnknownError(error).title;
 }
