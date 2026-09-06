@@ -1,31 +1,52 @@
 # Roblox Volleyball League
 
-Official website and management platform for the Roblox Volleyball League – a modern web application for teams, matches, and player statistics.
+Official website and management platform for the Roblox Volleyball League.
+It provides tools and pages for league teams, matches, players, and statistics.
 
 ## Stack
 
-- **Hosting & Backend**: Cloudflare Worker with [vinext](https://github.com/vinxi/vinext) App Router
-- **Database**: Cloudflare D1 (SQLite)
-- **API**: tRPC (type-safe client-server communication)
-- **Authentication**: better-auth with Roblox OAuth
-- **Frontend**: React + Tailwind CSS
+- **Hosting & backend:** Cloudflare Worker with [vinext](https://github.com/vinxi/vinext) App Router
+- **Database:** Cloudflare D1 (SQLite)
+- **API:** tRPC
+- **Authentication:** better-auth with Roblox OAuth
+- **Frontend:** React and Tailwind CSS
 
-## Local Development
+## Local development
 
-### Prerequisites
-
-- Node.js (v18 or later)
-- [pnpm](https://pnpm.io/)
-- Cloudflare account (for D1 and Workers)
-
-### Setup
+Install dependencies:
 
 ```bash
-# Install dependencies
 pnpm install
+```
 
-# Prepare environment, run migrations, and seed local database
+Prepare the local database, including migrations and fixture data:
+
+```bash
 pnpm t3:prepare
+```
 
-# Start the development server (applies migrations automatically)
+Start the development server:
+
+```bash
 pnpm dev
+```
+
+Dev uses a persistent local D1 database under `.wrangler/state/`. Schema changes
+are stored as SQL files in `drizzle/`; `pnpm dev` applies pending local
+migrations automatically. Previously applied migrations are skipped.
+
+## Scripts
+
+- `pnpm dev` applies pending local D1 migrations, then starts the vinext development server.
+- `pnpm test` runs the test suite.
+- `pnpm lint` checks the project for linting issues.
+- `pnpm typecheck` runs TypeScript type checking.
+- `pnpm run build` builds the Cloudflare Worker output.
+- `pnpm run start` starts the built Worker locally with Wrangler.
+- `pnpm run deploy` deploys the Cloudflare Worker.
+- `pnpm db:migrate:local` applies local D1 migrations without resetting fixture data.
+
+## Documentation
+
+- [Rebuild plan](docs/REBUILD_PLAN.md)
+- [Bootstrap admin](tooling/bootstrap-admin.md)
