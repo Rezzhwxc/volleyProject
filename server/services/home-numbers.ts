@@ -1,11 +1,11 @@
 import type { Db } from "@db";
 import { cacheDelete, cacheRead, cacheWrite } from "../cache";
 import type { GameRegion } from "./games";
-import { avatarByUsername } from "./roblox";
+import { avatarHeadshotByUsername } from "./roblox";
 import * as stats from "./stats";
 
 export const HOME_NUMBERS_TTL = 60 * 60 * 24;
-const HOME_NUMBERS_KEY = "https://volley.internal/cache/home-numbers-season-v3";
+const HOME_NUMBERS_KEY = "https://volley.internal/cache/home-numbers-season-v4";
 
 const SEASON_METRICS = [
   { key: "totalKills", metric: "Kills · season" },
@@ -35,7 +35,7 @@ export type AvatarLookup = (name: string) => Promise<string | null>;
 
 async function defaultAvatar(name: string) {
   try {
-    return await avatarByUsername(name);
+    return await avatarHeadshotByUsername(name);
   } catch {
     return null;
   }

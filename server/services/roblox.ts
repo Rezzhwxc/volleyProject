@@ -11,6 +11,16 @@ const USER_AGENT = "Mozilla/5.0 (compatible; VolleyProject/1.0; +https://volleyb
 const USER_HOSTS = ["https://users.roblox.com", "https://users.roproxy.com"] as const;
 const THUMBNAIL_HOSTS = ["https://thumbnails.roblox.com", "https://thumbnails.roproxy.com"] as const;
 
+export type AvatarThumbnail = "full" | "headshot";
+
+function thumbnailEndpoint(type: AvatarThumbnail) {
+  return type === "headshot" ? "avatar-headshot" : "avatar";
+}
+
+function thumbnailSize(type: AvatarThumbnail) {
+  return type === "headshot" ? "150x150" : "720x720";
+}
+
 export function numericRobloxUserId(value: string | null | undefined): string | null {
   if (!value) return null;
   const match = value.match(/\d+/);
@@ -44,13 +54,16 @@ function httpsUrl(imageUrl: string): string {
 export async function avatarByUserId(
   userId: string,
   fetchImpl: typeof fetch = fetch,
+  type: AvatarThumbnail = "full",
 ): Promise<string | null> {
   const id = numericRobloxUserId(userId);
   if (!id) return null;
 
+  const endpoint = thumbnailEndpoint(type);
+  const size = thumbnailSize(type);
   const thumbnail = await firstOkJson<ThumbnailLookup>(
     THUMBNAIL_HOSTS.map(
-      (host) => `${host}/v1/users/avatar?userIds=${id}&size=720x720&format=Png&isCircular=false`,
+      (host) => `${host}/v1/users/${endpoint}?userIds=${id}&size=${size}&format=Png&isCircular=false`,
     ),
     fetchImpl,
   );
@@ -58,9 +71,17 @@ export async function avatarByUserId(
   return imageUrl ? httpsUrl(imageUrl) : null;
 }
 
+export async function avatarHeadshotByUserId(
+  userId: string,
+  fetchImpl: typeof fetch = fetch,
+): Promise<string | null> {
+  return avatarByUserId(userId, fetchImpl, "headshot");
+}
+
 export async function avatarByUsername(
   username: string,
   fetchImpl: typeof fetch = fetch,
+  type: AvatarThumbnail = "full",
 ): Promise<string | null> {
   const trimmed = username.trim();
   if (!trimmed) return null;
@@ -76,7 +97,14 @@ export async function avatarByUsername(
   );
   const userId = lookup?.data?.[0]?.id;
   if (!userId) return null;
-  return avatarByUserId(String(userId), fetchImpl);
+  return avatarByUserId(String(userId), fetchImpl, type);
+}
+
+export async function avatarHeadshotByUsername(
+  username: string,
+  fetchImpl: typeof fetch = fetch,
+): Promise<string | null> {
+  return avatarByUsername(username, fetchImpl, "headshot");
 }
 
 export async function avatarFor(
