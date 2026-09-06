@@ -394,8 +394,10 @@ function defaultName(teamsLinked: TeamRef[], fallback = "TBD vs TBD") {
   return teamsLinked.map((team) => team.name).join(" Vs. ");
 }
 
-export async function getById(db: Db, id: number) {
-  const game = await db.query.games.findFirst({ where: eq(games.id, id) });
+export async function getById(db: Db, id: number, region?: GameRegion) {
+  const game = await db.query.games.findFirst({
+    where: and(eq(games.id, id), matchRegion(region)),
+  });
   if (!game) return null;
 
   const [gameTeams, gameStats, season, [withStaff]] = await Promise.all([

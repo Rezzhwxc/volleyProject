@@ -1,4 +1,4 @@
-import { api } from "@server/trpc/server";
+import { portalApi } from "@server/trpc/server";
 import { PortalPage } from "@components/portal/portal-page";
 import { AwardsManager } from "@components/portal/awards-manager";
 
@@ -7,7 +7,7 @@ export const dynamic = "force-dynamic";
 export const metadata = { title: "Awards · Portal" };
 
 export default async function PortalAwardsPage() {
-  const trpc = await api();
+  const trpc = await portalApi();
   const [rows, seasonList] = await Promise.all([trpc.awards.list(), trpc.seasons.list()]);
 
   return (

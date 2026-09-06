@@ -79,7 +79,7 @@ export async function getById(db: Db, id: number, region?: GameRegion) {
   if (!player) return null;
 
   const [playerTeams, playerStats, playerAwards, playerRecords] = await Promise.all([
-    listTeams(db, id),
+    listTeams(db, id, region),
     db
       .select({
         id: stats.id,
@@ -149,7 +149,7 @@ export async function getById(db: Db, id: number, region?: GameRegion) {
   };
 }
 
-export async function listTeams(db: Db, playerId: number) {
+export async function listTeams(db: Db, playerId: number, region?: GameRegion) {
   return db
     .select({
       id: teams.id,
@@ -162,7 +162,7 @@ export async function listTeams(db: Db, playerId: number) {
     .from(teamsPlayers)
     .innerJoin(teams, eq(teamsPlayers.teamId, teams.id))
     .leftJoin(seasons, eq(teams.seasonId, seasons.id))
-    .where(eq(teamsPlayers.playerId, playerId))
+    .where(and(eq(teamsPlayers.playerId, playerId), region ? teamInRegion(region) : undefined))
     .orderBy(asc(teams.name));
 }
 

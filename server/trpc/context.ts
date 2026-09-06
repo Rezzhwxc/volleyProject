@@ -1,8 +1,12 @@
 import { getDb } from "@db";
 import { getAuth } from "@server/auth";
+import { PORTAL_SKIP_REGION_HEADER, regionFromCookieHeader } from "@/lib/region";
 import type { Context, TrpcUser } from "./init";
 
-export async function createContext(headers: Headers): Promise<Context> {
+export async function createContext(
+  headers: Headers,
+  options: { skipRegion?: boolean } = {},
+): Promise<Context> {
   const session = await getAuth().api.getSession({ headers });
   const user = session?.user
     ? ({
@@ -13,5 +17,11 @@ export async function createContext(headers: Headers): Promise<Context> {
       } satisfies TrpcUser)
     : null;
 
-  return { db: getDb(), user };
+  const skipRegion = options.skipRegion || headers.get(PORTAL_SKIP_REGION_HEADER) === "1";
+
+  return {
+    db: getDb(),
+    user,
+    region: skipRegion ? undefined : regionFromCookieHeader(headers.get("cookie")),
+  };
 }

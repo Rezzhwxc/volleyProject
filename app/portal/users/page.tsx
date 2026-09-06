@@ -1,4 +1,4 @@
-import { api } from "@server/trpc/server";
+import { portalApi } from "@server/trpc/server";
 import { PortalPage } from "@components/portal/portal-page";
 import { UsersManager } from "@components/portal/users-manager";
 
@@ -7,7 +7,7 @@ export const dynamic = "force-dynamic";
 export const metadata = { title: "Users · Portal" };
 
 export default async function PortalUsersPage() {
-  const rows = await (await api()).users.list();
+  const rows = await (await portalApi()).users.list();
 
   return (
     <PortalPage

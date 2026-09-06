@@ -64,6 +64,12 @@ describe("teams", () => {
     expect(eu.map((row) => row.name).sort()).toEqual(["Desert Servers", "Forest Diggers"]);
   });
 
+  it("hides games from other regions on a team profile", async () => {
+    const team = await teams.getByName(db, FIXTURES.teamName, "eu");
+    expect(team?.id).toBe(FIXTURES.teamId);
+    expect(team?.games).toEqual([]);
+  });
+
   it("keys a team by name", async () => {
     const team = await teams.getByName(db, FIXTURES.teamName);
     expect(team?.id).toBe(FIXTURES.teamId);
@@ -105,6 +111,14 @@ describe("players", () => {
     expect(player?.awards).toHaveLength(1);
     expect(player?.awards[0]?.seasonNumber).toBe(1);
     expect(player?.records).toHaveLength(1);
+  });
+
+  it("hides teams, stats and records from other regions", async () => {
+    const player = await players.getById(db, FIXTURES.playerId, "eu");
+    expect(player?.id).toBe(FIXTURES.playerId);
+    expect(player?.teams).toEqual([]);
+    expect(player?.stats).toEqual([]);
+    expect(player?.records).toEqual([]);
   });
 
   it("links a sign-in to an existing player with the same Roblox name", async () => {
@@ -179,6 +193,8 @@ describe("games", () => {
     expect(await games.listPlayed(db, "eu")).toEqual([]);
     expect(await games.listSchedule(db, FIXTURES.otherSeasonId, "eu")).toHaveLength(1);
     expect(await games.listSchedule(db, FIXTURES.otherSeasonId, "na")).toEqual([]);
+    expect(await games.getById(db, FIXTURES.gameId, "eu")).toBeNull();
+    expect((await games.getById(db, 5, "eu"))?.region).toBe("eu");
   });
 
   it("creates a game from team names and links them", async () => {

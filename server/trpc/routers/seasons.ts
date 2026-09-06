@@ -1,6 +1,6 @@
 import { env } from "cloudflare:workers";
 import { seasons, sheetImport, type AssembledSources, type SheetImportPreview } from "@server/services";
-import { adminProcedure, publicProcedure, router } from "../init";
+import { adminProcedure, publicProcedure, router, scopedRegion } from "../init";
 import { revalidate } from "../revalidate";
 import {
   byId,
@@ -14,11 +14,11 @@ import {
 export const seasonsRouter = router({
   list: publicProcedure
     .input(optionalRegion)
-    .query(({ ctx, input }) => seasons.list(ctx.db, input?.region)),
+    .query(({ ctx, input }) => seasons.list(ctx.db, scopedRegion(ctx, input?.region))),
 
   byId: publicProcedure
     .input(byId.extend({ region: regionValue }))
-    .query(({ ctx, input }) => seasons.getById(ctx.db, input.id, input.region)),
+    .query(({ ctx, input }) => seasons.getById(ctx.db, input.id, scopedRegion(ctx, input.region))),
 
   count: adminProcedure.query(({ ctx }) => seasons.count(ctx.db)),
 

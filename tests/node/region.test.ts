@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   DEFAULT_SITE_REGION,
   parseSiteRegion,
+  regionFromCookieHeader,
   regionQuery,
   SITE_REGION_COOKIE,
   siteRegionCookie,
@@ -36,5 +37,19 @@ describe("siteRegionCookie", () => {
     expect(siteRegionCookie("eu")).toContain(`${SITE_REGION_COOKIE}=eu`);
     expect(siteRegionCookie("eu")).toContain("path=/");
     expect(siteRegionCookie("eu")).toContain("samesite=lax");
+  });
+});
+
+describe("regionFromCookieHeader", () => {
+  it("defaults to NA when the cookie is missing", () => {
+    expect(regionFromCookieHeader(undefined)).toBe("na");
+    expect(regionFromCookieHeader("")).toBe("na");
+    expect(regionFromCookieHeader("sidebar_state=true")).toBe("na");
+  });
+
+  it("reads the site cookie among other cookies", () => {
+    expect(regionFromCookieHeader(`${SITE_REGION_COOKIE}=eu; sidebar_state=true`)).toBe("eu");
+    expect(regionFromCookieHeader(`theme=dark; ${SITE_REGION_COOKIE}=all`)).toBeUndefined();
+    expect(regionFromCookieHeader(`${SITE_REGION_COOKIE}=SA`)).toBe("sa");
   });
 });

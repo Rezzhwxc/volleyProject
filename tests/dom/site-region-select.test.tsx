@@ -18,6 +18,7 @@ describe("SiteRegionSelect", () => {
       back: vi.fn(),
       forward: vi.fn(),
       prefetch: vi.fn(),
+      bfcacheId: "",
     });
   });
 

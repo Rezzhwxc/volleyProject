@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { api } from "@server/trpc/server";
+import { portalApi } from "@server/trpc/server";
 import { PortalPage } from "@components/portal/portal-page";
 
 export const dynamic = "force-dynamic";
@@ -19,7 +19,7 @@ const RESOURCES = [
 ] as const;
 
 export default async function PortalDashboard() {
-  const trpc = await api();
+  const trpc = await portalApi();
   const [
     seasonCount,
     teamCount,
