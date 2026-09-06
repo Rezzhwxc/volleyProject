@@ -17,9 +17,9 @@ const load = cache(async (id: string) => {
   return (await api()).players.byId({ id: parsed });
 });
 
-const loadAvatar = cache(async (name: string) => {
+const loadAvatar = cache(async (name: string, robloxUserId: string | null) => {
   try {
-    return await roblox.avatarByUsername(name);
+    return await roblox.avatarFor({ name, robloxUserId });
   } catch {
     return null;
   }
@@ -31,7 +31,7 @@ export async function generateMetadata({ params }: Params): Promise<Metadata> {
   if (!player) return { title: "Player not found" };
 
   const description = `${player.name} is a ${player.position} in the Roblox Volleyball League. View stats, teams, awards, and career highlights.`;
-  const avatarUrl = await loadAvatar(player.name);
+  const avatarUrl = await loadAvatar(player.name, player.robloxUserId);
 
   return {
     title: player.name,
@@ -51,7 +51,7 @@ export default async function PlayerPage({ params }: Params) {
 
   const trpc = await api();
   const [avatarUrl, seasons] = await Promise.all([
-    loadAvatar(player.name),
+    loadAvatar(player.name, player.robloxUserId),
     trpc.seasons.list(),
   ]);
 
@@ -67,6 +67,7 @@ export default async function PlayerPage({ params }: Params) {
     <PlayerProfile
       name={player.name}
       position={player.position}
+      robloxUserId={player.robloxUserId}
       avatarUrl={avatarUrl}
       currentSeasonNumber={currentSeason?.seasonNumber ?? null}
       teams={player.teams.map((team) => ({
