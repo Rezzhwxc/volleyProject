@@ -10,6 +10,7 @@ import {
   type ReactNode,
 } from "react";
 import { toast } from "sonner";
+import { formatUnknownError } from "@/lib/format-error";
 import { Button } from "@components/ui/button";
 import {
   Dialog,
@@ -32,13 +33,7 @@ type PortalErrorApi = {
 const PortalErrorToastContext = createContext<PortalErrorApi | null>(null);
 
 function formatError(error: unknown): string {
-  if (error instanceof Error) return error.message;
-  if (typeof error === "string") return error;
-  try {
-    return JSON.stringify(error, null, 2);
-  } catch {
-    return String(error);
-  }
+  return formatUnknownError(error);
 }
 
 function preview(message: string, max = 100): string {

@@ -167,8 +167,11 @@ const sheetImportFilters = {
   excludeGameKeys: z.array(z.string()).optional(),
 };
 
+const sheetImportSessionId = z.string().uuid();
+
 const sheetImportCommitExtras = {
   ...sheetImportFilters,
+  sessionId: sheetImportSessionId.optional(),
   sources: sheetImportSources.optional(),
   preview: sheetImportPreviewSnapshot.optional(),
 };
@@ -193,10 +196,10 @@ const sheetImportTeamsShape = {
 } as const;
 
 export const sheetImportFull = z.object(sheetImportFullShape).superRefine((data, ctx) => {
-  if (!data.preview && !data.sources && !data.masterUrl) {
+  if (!data.sessionId && !data.preview && !data.sources && !data.masterUrl) {
     ctx.addIssue({
       code: "custom",
-      message: "Provide staged preview, sources from preview, or a master sheet URL",
+      message: "Provide a session id, staged preview, sources from preview, or a master sheet URL",
       path: ["masterUrl"],
     });
   }
@@ -204,6 +207,7 @@ export const sheetImportFull = z.object(sheetImportFullShape).superRefine((data,
 
 export const sheetImportTeams = z.object(sheetImportTeamsShape).superRefine((data, ctx) => {
   if (
+    !data.sessionId &&
     !data.preview &&
     !data.sources &&
     !data.masterUrl &&
@@ -213,29 +217,48 @@ export const sheetImportTeams = z.object(sheetImportTeamsShape).superRefine((dat
   ) {
     ctx.addIssue({
       code: "custom",
-      message: "Provide staged preview, sources from preview, or at least one sheet URL",
+      message: "Provide a session id, staged preview, sources from preview, or at least one sheet URL",
       path: ["sources"],
     });
   }
 });
 
-/** Staged preview assembly — omit URL/preview fields (Zod forbids .omit on refined schemas). */
-export const sheetImportAssembleFull = z.object({
-  mode: z.literal("full"),
-  seasonNumber: z.number().int().positive(),
-  startDate: isoDate,
-  endDate: isoDate.nullable().optional(),
-  theme: z.string().min(1).nullable().optional(),
-  ...sheetImportFilters,
-  sources: sheetImportSources,
-});
+function requireSessionOrSources(
+  data: { sessionId?: string | undefined; sources?: unknown },
+  ctx: z.RefinementCtx,
+) {
+  if (!data.sessionId && !data.sources) {
+    ctx.addIssue({
+      code: "custom",
+      message: "Provide a session id or staged sources",
+      path: ["sessionId"],
+    });
+  }
+}
 
-export const sheetImportAssembleTeams = z.object({
-  mode: z.enum(["teams", "teams_and_players", "players"]),
-  seasonId: id,
-  ...sheetImportFilters,
-  sources: sheetImportSources,
-});
+/** Staged preview assembly — omit URL/preview fields (Zod forbids .omit on refined schemas). */
+export const sheetImportAssembleFull = z
+  .object({
+    mode: z.literal("full"),
+    seasonNumber: z.number().int().positive(),
+    startDate: isoDate,
+    endDate: isoDate.nullable().optional(),
+    theme: z.string().min(1).nullable().optional(),
+    ...sheetImportFilters,
+    sessionId: sheetImportSessionId.optional(),
+    sources: sheetImportSources.optional(),
+  })
+  .superRefine(requireSessionOrSources);
+
+export const sheetImportAssembleTeams = z
+  .object({
+    mode: z.enum(["teams", "teams_and_players", "players"]),
+    seasonId: id,
+    ...sheetImportFilters,
+    sessionId: sheetImportSessionId.optional(),
+    sources: sheetImportSources.optional(),
+  })
+  .superRefine(requireSessionOrSources);
 
 export const teamCreate = z.object({
   name: z.string().min(1),

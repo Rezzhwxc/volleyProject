@@ -28,7 +28,12 @@ type TeamMode = "teams" | "teams_and_players" | "players";
 type Preview = SheetImportPreviewData;
 
 type StagedSources = {
-  masterTeams: Array<{ name: string; region: SheetRegion | null; playerNames: string[] }>;
+  masterTeams: Array<{
+    name: string;
+    region: SheetRegion | null;
+    playerNames: string[];
+    leadership?: Partial<Record<"C" | "VC" | "CC", string>>;
+  }>;
   masterGames: Array<{
     key: string;
     region: SheetRegion;
@@ -204,6 +209,7 @@ function emptyProgress(): ProgressState {
 }
 
 function useSheetPreviewLoader() {
+  const startSession = trpc.sheetImport.startSession.useMutation();
   const loadMaster = trpc.sheetImport.loadMaster.useMutation();
   const loadRegionalBatch = trpc.sheetImport.loadRegionalBatch.useMutation();
   const assemble = trpc.sheetImport.assemblePreview.useMutation();
@@ -218,7 +224,7 @@ function useSheetPreviewLoader() {
     seasonId?: number;
     endDate?: string | null;
     theme?: string | null;
-  }): Promise<{ preview: Preview; sources: StagedSources }> => {
+  }): Promise<{ preview: Preview; sources: StagedSources; sessionId: string }> => {
     const regionalEntries = (
       [
         ["na", input.regionalUrls.na],
@@ -242,8 +248,9 @@ function useSheetPreviewLoader() {
     };
 
     setProgress({ active: true, failed: false, index: 0, total, label: "Starting…", log: [] });
+    const { sessionId } = await startSession.mutateAsync();
 
-    let masterTeams: Array<{ name: string; region: SheetRegion | null; playerNames: string[] }> = [];
+    let masterTeams: StagedSources["masterTeams"] = [];
     let masterGames: Array<{
       key: string;
       region: SheetRegion;
@@ -289,6 +296,7 @@ function useSheetPreviewLoader() {
         bump("Loading master schedule sheet…", "Reading NA/EU/AS teams and match tabs");
         const master = await loadMaster.mutateAsync({
           url: input.masterUrl,
+          sessionId,
           ...(input.startDate ? { startDate: input.startDate } : {}),
         });
         masterTeams = master.teams;
@@ -314,6 +322,7 @@ function useSheetPreviewLoader() {
             region,
             startIndex,
             batchSize: 4,
+            sessionId,
           });
           tabCount = batch.tabCount;
           teamsLoaded += batch.teams.length;
@@ -355,12 +364,12 @@ function useSheetPreviewLoader() {
               startDate: input.startDate!,
               endDate: input.endDate ?? null,
               theme: input.theme ?? null,
-              sources,
+              sessionId,
             })
           : await assemble.mutateAsync({
               mode: input.mode,
               seasonId: input.seasonId!,
-              sources,
+              sessionId,
             });
 
       doneStep(
@@ -371,7 +380,7 @@ function useSheetPreviewLoader() {
       );
 
       setProgress(emptyProgress());
-      return { preview: preview as Preview, sources };
+      return { preview: preview as Preview, sources, sessionId };
     } catch (error) {
       const detail = error instanceof Error ? error.message : "Unknown error";
       setProgress((current) => ({
@@ -402,7 +411,7 @@ export function SeasonSheetImport() {
   const [euUrl, setEuUrl] = useState("");
   const [asUrl, setAsUrl] = useState("");
   const [preview, setPreview] = useState<Preview | null>(null);
-  const [stagedSources, setStagedSources] = useState<StagedSources | null>(null);
+  const [importSessionId, setImportSessionId] = useState<string | null>(null);
   const [excludedTeams, setExcludedTeams] = useState<Set<string>>(new Set());
   const [excludedGames, setExcludedGames] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
@@ -416,7 +425,7 @@ export function SeasonSheetImport() {
   const reset = () => {
     setStep("form");
     setPreview(null);
-    setStagedSources(null);
+    setImportSessionId(null);
     setExcludedTeams(new Set());
     setExcludedGames(new Set());
     setBusy(false);
@@ -429,11 +438,9 @@ export function SeasonSheetImport() {
       startDate,
       endDate: endDate || null,
       theme: theme || null,
-      ...(preview
-        ? { preview }
-        : stagedSources
-          ? { sources: stagedSources }
-          : { masterUrl, regionalUrls: regionalPayload(naUrl, euUrl, asUrl) }),
+      ...(importSessionId
+        ? { sessionId: importSessionId }
+        : { masterUrl, regionalUrls: regionalPayload(naUrl, euUrl, asUrl) }),
       excludeTeamKeys: [...excludedTeams],
       excludeGameKeys: [...excludedGames],
     }),
@@ -448,8 +455,7 @@ export function SeasonSheetImport() {
       asUrl,
       excludedTeams,
       excludedGames,
-      stagedSources,
-      preview,
+      importSessionId,
     ],
   );
 
@@ -483,7 +489,7 @@ export function SeasonSheetImport() {
               setBusy(true);
               setLastImportError(null);
               try {
-                const { preview: result, sources } = await run({
+                const { preview: result, sessionId } = await run({
                   mode: "full",
                   seasonNumber: Number.parseInt(seasonNumber, 10),
                   startDate,
@@ -493,7 +499,7 @@ export function SeasonSheetImport() {
                   regionalUrls: regionalPayload(naUrl, euUrl, asUrl),
                 });
                 setPreview(result);
-                setStagedSources(sources);
+                setImportSessionId(sessionId);
                 setExcludedTeams(new Set());
                 setExcludedGames(new Set());
                 setStep("preview");
@@ -647,7 +653,7 @@ export function TeamsSheetImport({
   const [euUrl, setEuUrl] = useState("");
   const [asUrl, setAsUrl] = useState("");
   const [preview, setPreview] = useState<Preview | null>(null);
-  const [stagedSources, setStagedSources] = useState<StagedSources | null>(null);
+  const [importSessionId, setImportSessionId] = useState<string | null>(null);
   const [excludedTeams, setExcludedTeams] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
   const [lastImportError, setLastImportError] = useState<{ title: string; error: unknown } | null>(
@@ -660,7 +666,7 @@ export function TeamsSheetImport({
   const reset = () => {
     setStep("form");
     setPreview(null);
-    setStagedSources(null);
+    setImportSessionId(null);
     setExcludedTeams(new Set());
     setBusy(false);
   };
@@ -668,14 +674,12 @@ export function TeamsSheetImport({
   const baseInput = {
     mode,
     seasonId: Number.parseInt(seasonId, 10),
-    ...(preview
-      ? { preview }
-      : stagedSources
-        ? { sources: stagedSources }
-        : {
-            ...(masterUrl ? { masterUrl } : {}),
-            regionalUrls: regionalPayload(naUrl, euUrl, asUrl),
-          }),
+    ...(importSessionId
+      ? { sessionId: importSessionId }
+      : {
+          ...(masterUrl ? { masterUrl } : {}),
+          regionalUrls: regionalPayload(naUrl, euUrl, asUrl),
+        }),
     excludeTeamKeys: [...excludedTeams],
   };
 
@@ -709,14 +713,14 @@ export function TeamsSheetImport({
               setBusy(true);
               setLastImportError(null);
               try {
-                const { preview: result, sources } = await run({
+                const { preview: result, sessionId: nextSessionId } = await run({
                   mode,
                   seasonId: Number.parseInt(seasonId, 10),
                   ...(masterUrl ? { masterUrl } : {}),
                   regionalUrls: regionalPayload(naUrl, euUrl, asUrl),
                 });
                 setPreview(result);
-                setStagedSources(sources);
+                setImportSessionId(nextSessionId);
                 setExcludedTeams(new Set());
                 setStep("preview");
               } catch (error) {

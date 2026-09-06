@@ -4,7 +4,13 @@ import { matchStatsToGames, mergeTeamRosters, rosterSizeWarnings } from "@server
 import { displayName, normalizeName, parseTeamHeader } from "@server/services/sheet-import/names";
 import { parseMasterScheduleTab, parseMasterTeamsTab } from "@server/services/sheet-import/parse-master";
 import { parseRegionalPlayersLeaderboard, parseRegionalTeamTab, parseRegionalWorkbook } from "@server/services/sheet-import/parse-regional";
-import type { ParsedGame, ParsedScoreBlock } from "@server/services/sheet-import/types";
+import { toClientPreview } from "@server/services/sheet-import/preview";
+import {
+  createSheetImportSession,
+  mergeSheetImportSession,
+  requireSheetImportSession,
+} from "@server/services/sheet-import/session";
+import type { ParsedGame, ParsedScoreBlock, SheetImportPreview } from "@server/services/sheet-import/types";
 import {
   importKeyFromStoredGame,
   masterGameKey,
@@ -404,5 +410,107 @@ describe("matchStatsToGames", () => {
     ]);
     expect(matched.syntheticGames).toHaveLength(0);
     expect(matched.stats).toHaveLength(0);
+  });
+});
+
+describe("toClientPreview", () => {
+  it("drops stat rows but keeps the full count", () => {
+    const preview = {
+      mode: "full",
+      seasonNumber: 2,
+      seasonId: null,
+      counts: {
+        teams: 1,
+        players: 1,
+        playersNew: 1,
+        playersExisting: 0,
+        games: 1,
+        stats: 2,
+        warnings: 0,
+        errors: 0,
+      },
+      teams: [],
+      players: [],
+      games: [],
+      stats: [
+        {
+          gameKey: "a",
+          teamName: "Teiko",
+          playerName: "ace",
+          counts: {
+            spikeKills: 1,
+            spikeAttempts: 2,
+            spikingErrors: 0,
+            apeKills: 0,
+            apeAttempts: 0,
+            assists: 0,
+            settingErrors: 0,
+            blocks: 0,
+            blockFollows: 0,
+            digs: 0,
+            aces: 0,
+            servingErrors: 0,
+            miscErrors: 0,
+          },
+        },
+        {
+          gameKey: "a",
+          teamName: "Teiko",
+          playerName: "lib",
+          counts: {
+            spikeKills: 0,
+            spikeAttempts: 0,
+            spikingErrors: 0,
+            apeKills: 0,
+            apeAttempts: 0,
+            assists: 0,
+            settingErrors: 0,
+            blocks: 0,
+            blockFollows: 0,
+            digs: 4,
+            aces: 0,
+            servingErrors: 0,
+            miscErrors: 0,
+          },
+        },
+      ],
+      warnings: [],
+      errors: [],
+    } satisfies SheetImportPreview;
+
+    const slim = toClientPreview(preview);
+    expect(slim.counts.stats).toBe(2);
+    expect(slim.stats).toEqual([]);
+  });
+});
+
+describe("sheet import session", () => {
+  it("merges master then regional batches", async () => {
+    const sessionId = await createSheetImportSession();
+    await mergeSheetImportSession(sessionId, {
+      masterTeams: [{ name: "Teiko", region: "na", playerNames: ["ace"] }],
+      masterGames: [],
+      sourceWarnings: ["master note"],
+    });
+    await mergeSheetImportSession(sessionId, {
+      regionalTeams: [{ name: "Teiko", region: "na", playerNames: ["ace", "lib"] }],
+      regionalBlocks: [
+        {
+          teamName: "Teiko",
+          region: "na",
+          winnerName: "Teiko",
+          teamScore: 2,
+          opponentScore: 0,
+          rows: [],
+        },
+      ],
+      sourceWarnings: ["na note"],
+    });
+
+    const sources = await requireSheetImportSession(sessionId);
+    expect(sources.masterTeams).toHaveLength(1);
+    expect(sources.regionalTeams).toHaveLength(1);
+    expect(sources.regionalBlocks).toHaveLength(1);
+    expect(sources.sourceWarnings).toEqual(["master note", "na note"]);
   });
 });

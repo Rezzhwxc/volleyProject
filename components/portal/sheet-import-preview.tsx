@@ -522,6 +522,14 @@ export function SheetImportPreviewTables({
                 </tr>
               </thead>
               <tbody>
+                {filteredStats.length === 0 && preview.counts.stats > 0 ? (
+                  <tr>
+                    <td className="p-3 font-mono text-[0.68rem] text-rvl-ink-2" colSpan={6}>
+                      {preview.counts.stats} stat rows will be imported on confirm. Game
+                      matching is listed on the Games tab.
+                    </td>
+                  </tr>
+                ) : null}
                 {filteredStats.slice(0, 500).map((stat, index) => (
                   <tr
                     key={`${stat.gameKey}-${stat.playerName}-${index}`}

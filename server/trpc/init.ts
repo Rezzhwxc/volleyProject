@@ -3,6 +3,7 @@ import superjson from "superjson";
 import { ZodError } from "zod";
 import type { Db } from "@db";
 import type { MatchRegion } from "@/lib/region";
+import { errorDetail, explainError, logError } from "../report";
 import { ServiceError } from "../services/errors";
 import { isAdmin } from "../services/users";
 
@@ -29,18 +30,26 @@ const t = initTRPC.context<Context>().create({
   errorFormatter({ shape, error }) {
     return {
       ...shape,
+      message: explainError(error).message,
       data: {
         ...shape.data,
         zodError: error.cause instanceof ZodError ? error.cause.flatten() : null,
+        cause: errorDetail(error.cause ?? error) || null,
       },
     };
   },
 });
 
-const translateServiceErrors = t.middleware(async ({ next }) => {
+const translateServiceErrors = t.middleware(async ({ path, type, next }) => {
   try {
     return await next();
   } catch (error) {
+    if (error instanceof TRPCError) {
+      if (error.code === "INTERNAL_SERVER_ERROR") {
+        logError("trpc", error, { path, type });
+      }
+      throw error;
+    }
     if (error instanceof ServiceError) {
       const code =
         error.code === "NOT_FOUND"
@@ -50,7 +59,13 @@ const translateServiceErrors = t.middleware(async ({ next }) => {
             : "BAD_REQUEST";
       throw new TRPCError({ code, message: error.message, cause: error });
     }
-    throw error;
+    logError("trpc", error, { path, type });
+    const explained = explainError(error);
+    throw new TRPCError({
+      code: "INTERNAL_SERVER_ERROR",
+      message: explained.message,
+      cause: error,
+    });
   }
 });
 
