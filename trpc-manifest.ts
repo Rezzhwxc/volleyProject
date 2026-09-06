@@ -112,6 +112,13 @@ export const trpcManifest: TrpcManifestEntry[] = [
 
   { endpoint: "POST /api/teams", procedure: "teams.create", access: "admin", status: "done" },
   { endpoint: "PATCH /api/teams/:id", procedure: "teams.update", access: "admin", status: "done" },
+  {
+    endpoint: "PATCH /api/teams/:id/profile",
+    procedure: "teams.updateProfile",
+    access: "protected",
+    status: "done",
+    rationale: "captains and linked users can edit their team profile",
+  },
   { endpoint: "DELETE /api/teams/:id", procedure: "teams.delete", access: "admin", status: "done" },
   { endpoint: "PUT /api/teams/:id", procedure: null, access: "admin", status: "removed", rationale: PUT_DUPLICATE },
   { endpoint: "POST /api/teams/batch", procedure: "teams.createMany", access: "admin", status: "done" },
